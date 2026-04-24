@@ -549,6 +549,8 @@ textarea { resize: vertical; min-height: 100px; }
 .badge-view { background: var(--accent-glow); color: var(--accent); }
 .badge-download { background: var(--success-dim); color: var(--success); }
 .badge-search { background: var(--gold-dim); color: var(--gold); }
+.badge-upload { background: var(--gold-dim); color: var(--gold); }
+.badge-bookmark { background: var(--danger-dim); color: var(--danger); }
 
 .activity-paper {
   font-size: 0.82rem;

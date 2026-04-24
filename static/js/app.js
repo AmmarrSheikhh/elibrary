@@ -266,14 +266,6 @@ async function loadDashboard() {
       document.getElementById('stat-views').textContent = stats.total_views?.toLocaleString() || '—';
       document.getElementById('stat-downloads').textContent = stats.total_downloads?.toLocaleString() || '—';
       document.getElementById('stat-flagged').textContent = stats.flagged_reports || '0';
-
-      const topList = document.getElementById('top-papers-list');
-      topList.innerHTML = (stats.top_papers || []).map(p => `
-        <div class="top-paper-item">
-          <span class="top-paper-title" onclick="viewPaper(${p.paper_id})">${p.title}</span>
-          <span class="top-paper-views">👁 ${p.views?.toLocaleString()}</span>
-        </div>
-      `).join('') || '<div class="text-muted">No data</div>';
     }
   } else {
     document.getElementById('stat-papers').textContent = '—';
@@ -285,8 +277,33 @@ async function loadDashboard() {
       const d = await res.json();
       document.getElementById('stat-papers').textContent = d.total?.toLocaleString() || '—';
     }
-    document.getElementById('top-papers-list').innerHTML = '<div class="text-muted">View admin panel for details</div>';
   }
+
+  loadTopPapersWidget();
+}
+
+async function loadTopPapersWidget() {
+  const topList = document.getElementById('top-papers-list');
+  topList.innerHTML = '<div class="loading">Loading papers...</div>';
+
+  const res = await apiFetch('/papers/top?limit=5');
+  if (!res) {
+    topList.innerHTML = '<div class="text-muted">Session expired. Please sign in again.</div>';
+    return;
+  }
+
+  const data = await readApiResponse(res);
+  if (!res.ok || !Array.isArray(data)) {
+    topList.innerHTML = '<div class="text-muted">Unable to load top papers</div>';
+    return;
+  }
+
+  topList.innerHTML = data.map(p => `
+    <div class="top-paper-item">
+      <span class="top-paper-title" onclick="viewPaper(${p.paper_id})">${p.title}</span>
+      <span class="top-paper-views">👁 ${(p.views || 0).toLocaleString()}</span>
+    </div>
+  `).join('') || '<div class="text-muted">No data</div>';
 }
 
 // ── PAPERS ─────────────────────────────────────
@@ -538,6 +555,13 @@ async function viewPaper(paperId) {
               <div style="font-size:0.72rem;opacity:0.7">Similarity Score</div>
             </div>
           </div>
+          ${p.matched_paper_title ? `
+            <div style="margin-top:0.65rem;font-size:0.78rem;color:var(--text-secondary)">
+              Closest match:
+              <span style="color:var(--accent);cursor:pointer" onclick="viewPaper(${p.matched_paper_id})">${p.matched_paper_title}</span>
+              <span style="font-family:var(--font-mono);color:var(--text-muted)">(${p.matched_similarity_score}%)</span>
+            </div>
+          ` : ''}
         </div>
         ` : ''}
 
@@ -701,10 +725,22 @@ async function uploadPaper() {
 
   const new_author_name = document.getElementById('new-author-name').value.trim();
   const new_author_affiliation = document.getElementById('new-author-affil').value.trim();
+  const new_category_name = document.getElementById('new-category-name').value.trim();
+  const new_category_description = document.getElementById('new-category-desc').value.trim();
 
   const res = await apiFetch('/papers', {
     method: 'POST',
-    body: JSON.stringify({ title, abstract, publication_year, author_ids, category_ids, new_author_name, new_author_affiliation })
+    body: JSON.stringify({
+      title,
+      abstract,
+      publication_year,
+      author_ids,
+      category_ids,
+      new_author_name,
+      new_author_affiliation,
+      new_category_name,
+      new_category_description
+    })
   });
 
   const data = await res.json();
@@ -715,24 +751,32 @@ async function uploadPaper() {
   resultDiv.style.display = 'block';
 
   if (plag.flagged) {
+    const matchInfo = plag.matched_paper_title
+      ? `<br>Closest match: <strong>${plag.matched_paper_title}</strong> (${plag.matched_similarity_score}%)`
+      : '';
+
     resultDiv.className = 'plag-result plag-high';
     resultDiv.innerHTML = `
       <strong>⚑ Plagiarism Alert</strong><br>
       Similarity score: <strong>${plag.similarity_score}%</strong> — Paper has been flagged for admin review.
-      It has been submitted but requires approval.
+      It has been submitted but requires approval.${matchInfo}
     `;
     showToast(`Paper submitted but flagged (${plag.similarity_score}% similarity)`, 'error');
   } else {
+    const matchInfo = plag.matched_paper_title
+      ? `<br>Closest match checked: <strong>${plag.matched_paper_title}</strong> (${plag.matched_similarity_score}%)`
+      : '';
+
     resultDiv.className = 'plag-result plag-low';
     resultDiv.innerHTML = `
       <strong>✓ Paper Uploaded Successfully!</strong><br>
-      Plagiarism check passed. Similarity score: <strong>${plag.similarity_score}%</strong>
+      Plagiarism check passed. Similarity score: <strong>${plag.similarity_score}%</strong>${matchInfo}
     `;
     showToast('Paper uploaded successfully!', 'success');
   }
 
   // Reset form
-  ['up-title', 'up-abstract', 'up-year', 'new-author-name', 'new-author-affil'].forEach(id => {
+  ['up-title', 'up-abstract', 'up-year', 'new-author-name', 'new-author-affil', 'new-category-name', 'new-category-desc'].forEach(id => {
     document.getElementById(id).value = '';
   });
 }
@@ -861,15 +905,19 @@ async function loadPlagiarismReports() {
   container.innerHTML = `
     <table class="data-table">
       <thead>
-        <tr><th>ID</th><th>Paper</th><th>Uploaded By</th><th>Similarity</th><th>Status</th><th>Action</th></tr>
+        <tr><th>ID</th><th>Paper</th><th>Matched With</th><th>Uploaded By</th><th>Similarity</th><th>Status</th><th>Action</th></tr>
       </thead>
       <tbody>
         ${reports.map(r => {
           const cls = r.similarity_score >= 20 ? 'text-danger' : r.similarity_score >= 10 ? '' : 'text-success';
+          const matchedWith = r.matched_paper_title
+            ? `<span style="cursor:pointer;color:var(--accent)" onclick="viewPaper(${r.matched_paper_id})">${r.matched_paper_title}</span> <span style="font-family:var(--font-mono);color:var(--text-muted)">(${r.matched_similarity_score}%)</span>`
+            : '<span class="text-muted">—</span>';
           return `
             <tr>
               <td><span style="font-family:var(--font-mono);color:var(--text-muted)">#${r.report_id}</span></td>
               <td><span style="cursor:pointer;color:var(--accent)" onclick="viewPaper(${r.paper_id})">${r.title}</span></td>
+              <td>${matchedWith}</td>
               <td>${r.uploaded_by}</td>
               <td class="${cls}" style="font-family:var(--font-mono)">${r.similarity_score}%</td>
               <td>${r.flagged ? '<span class="flagged-badge">⚑ Flagged</span>' : '<span style="color:var(--success);font-size:0.8rem">✓ Clear</span>'}</td>

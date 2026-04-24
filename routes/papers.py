@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from utils.db import get_db_connection, dict_from_row, rows_to_dicts
-from utils.plagiarism import check_plagiarism
+from utils.plagiarism import check_plagiarism, find_best_match
 
 papers_bp = Blueprint('papers', __name__)
 
@@ -24,6 +24,10 @@ def require_role(*role_ids):
 @jwt_required()
 def list_papers():
     """List papers with search/filter support."""
+    claims = get_jwt()
+    role_id = claims.get('role_id')
+    user_id = get_jwt_identity()
+
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -42,8 +46,25 @@ def list_papers():
         params = []
 
         if keyword:
-            conditions.append("(p.title LIKE ? OR p.abstract LIKE ?)")
-            params.extend([f'%{keyword}%', f'%{keyword}%'])
+            conditions.append(
+                """(
+                       p.title LIKE ?
+                       OR p.abstract LIKE ?
+                       OR EXISTS (
+                           SELECT 1
+                           FROM Paper_Authors pa_kw
+                           JOIN Authors a_kw ON pa_kw.author_id = a_kw.author_id
+                           WHERE pa_kw.paper_id = p.paper_id AND a_kw.author_name LIKE ?
+                       )
+                       OR EXISTS (
+                           SELECT 1
+                           FROM Paper_Categories pc_kw
+                           JOIN Categories c_kw ON pc_kw.category_id = c_kw.category_id
+                           WHERE pc_kw.paper_id = p.paper_id AND c_kw.category_name LIKE ?
+                       )
+                   )"""
+            )
+            params.extend([f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', f'%{keyword}%'])
         if author:
             conditions.append(
                 """EXISTS (
@@ -70,6 +91,11 @@ def list_papers():
         if year_to:
             conditions.append("p.publication_year <= ?")
             params.append(int(year_to))
+
+        # Flagged papers are only visible to uploader and admins until approved.
+        if role_id != 1:
+            conditions.append("(COALESCE(pr.flagged, 0) = 0 OR p.uploaded_by = ?)")
+            params.append(user_id)
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
@@ -122,6 +148,7 @@ def list_papers():
         count_query = f"""
             SELECT COUNT(*)
             FROM Papers p
+            LEFT JOIN PlagiarismReports pr ON p.paper_id = pr.paper_id
             {where_clause}
         """
         cursor.execute(count_query, params)
@@ -137,10 +164,51 @@ def list_papers():
         conn.close()
 
 
+@papers_bp.route('/top', methods=['GET'])
+@jwt_required()
+def top_papers():
+    """Return top viewed papers for dashboard widgets."""
+    claims = get_jwt()
+    role_id = claims.get('role_id')
+    user_id = get_jwt_identity()
+    limit = min(max(int(request.args.get('limit', 5)), 1), 20)
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        where_clause = ""
+        params = []
+        if role_id != 1:
+            where_clause = "WHERE COALESCE(pr.flagged, 0) = 0 OR p.uploaded_by = ?"
+            params.append(user_id)
+
+        cursor.execute(
+            f"""
+            SELECT TOP {limit}
+                   p.paper_id,
+                   p.title,
+                   COALESCE(ps.views, 0) AS views,
+                   COALESCE(ps.downloads, 0) AS downloads
+            FROM Papers p
+            LEFT JOIN Paper_Statistics ps ON p.paper_id = ps.paper_id
+            LEFT JOIN PlagiarismReports pr ON p.paper_id = pr.paper_id
+            {where_clause}
+            ORDER BY COALESCE(ps.views, 0) DESC, p.paper_id DESC
+            """,
+            params,
+        )
+
+        return jsonify(rows_to_dicts(cursor.fetchall(), cursor))
+    finally:
+        conn.close()
+
+
 @papers_bp.route('/<int:paper_id>', methods=['GET'])
 @jwt_required()
 def get_paper(paper_id):
     """Get a single paper with full details. Also logs VIEW activity."""
+    claims = get_jwt()
+    role_id = claims.get('role_id')
     user_id = get_jwt_identity()
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -160,6 +228,9 @@ def get_paper(paper_id):
         paper = dict_from_row(cursor.fetchone(), cursor)
         if not paper:
             return jsonify({'error': 'Paper not found'}), 404
+
+        if paper.get('flagged') and role_id != 1 and str(paper.get('uploaded_by')) != str(user_id):
+            return jsonify({'error': 'This paper is under plagiarism review and is not visible yet.'}), 403
 
         # Authors
         cursor.execute("""
@@ -206,6 +277,17 @@ def get_paper(paper_id):
             sum(r['rating'] for r in paper['reviews']) / len(paper['reviews']), 1
         ) if paper['reviews'] else None
 
+        # Include closest matched paper context for plagiarism transparency.
+        cursor.execute(
+            "SELECT paper_id, title, abstract FROM Papers WHERE paper_id != ? AND abstract IS NOT NULL",
+            (paper_id,)
+        )
+        candidates = rows_to_dicts(cursor.fetchall(), cursor)
+        best_match = find_best_match(paper_id, paper.get('abstract') or '', candidates)
+        paper['matched_paper_id'] = best_match['paper_id'] if best_match else None
+        paper['matched_paper_title'] = best_match['title'] if best_match else None
+        paper['matched_similarity_score'] = best_match['similarity_score'] if best_match else 0.0
+
         # Log view activity
         cursor.execute(
             "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'VIEW')",
@@ -228,10 +310,27 @@ def get_paper(paper_id):
 @jwt_required()
 def download_paper(paper_id):
     """Log download activity and increment counter."""
+    claims = get_jwt()
+    role_id = claims.get('role_id')
     user_id = get_jwt_identity()
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        cursor.execute(
+            """SELECT p.uploaded_by, COALESCE(pr.flagged, 0) AS flagged
+               FROM Papers p
+               LEFT JOIN PlagiarismReports pr ON p.paper_id = pr.paper_id
+               WHERE p.paper_id = ?""",
+            (paper_id,)
+        )
+        paper_row = cursor.fetchone()
+        if not paper_row:
+            return jsonify({'error': 'Paper not found'}), 404
+
+        uploaded_by, flagged = paper_row
+        if flagged and role_id != 1 and str(uploaded_by) != str(user_id):
+            return jsonify({'error': 'This paper is under plagiarism review and is not visible yet.'}), 403
+
         cursor.execute(
             "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'DOWNLOAD')",
             (user_id, paper_id)
@@ -257,14 +356,28 @@ def upload_paper():
         return jsonify({'error': 'Only Researchers and Admins can upload papers'}), 403
 
     user_id = get_jwt_identity()
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+
+    def parse_unique_ints(values):
+        parsed = []
+        for value in values or []:
+            try:
+                int_value = int(value)
+            except (TypeError, ValueError):
+                continue
+            if int_value not in parsed:
+                parsed.append(int_value)
+        return parsed
+
     title = data.get('title', '').strip()
     abstract = data.get('abstract', '').strip()
     publication_year = data.get('publication_year')
-    author_ids = data.get('author_ids', [])
-    category_ids = data.get('category_ids', [])
+    author_ids = parse_unique_ints(data.get('author_ids', []))
+    category_ids = parse_unique_ints(data.get('category_ids', []))
     new_author_name = data.get('new_author_name', '').strip()
     new_author_affiliation = data.get('new_author_affiliation', '').strip()
+    new_category_name = data.get('new_category_name', '').strip()
+    new_category_description = data.get('new_category_description', '').strip()
 
     if not title or not publication_year:
         return jsonify({'error': 'Title and publication year are required'}), 400
@@ -310,6 +423,35 @@ def upload_paper():
                 "INSERT INTO Paper_Categories (paper_id, category_id) VALUES (?, ?)",
                 (paper_id, cid)
             )
+
+        # Handle new category
+        if new_category_name:
+            cursor.execute(
+                "SELECT TOP 1 category_id FROM Categories WHERE LOWER(category_name) = LOWER(?)",
+                (new_category_name,)
+            )
+            category_row = cursor.fetchone()
+            if category_row:
+                new_category_id = category_row[0]
+            else:
+                cursor.execute(
+                    """INSERT INTO Categories (category_name, description)
+                       OUTPUT INSERTED.category_id VALUES (?, ?)""",
+                    (new_category_name, new_category_description or None)
+                )
+                new_category_id = cursor.fetchone()[0]
+
+            cursor.execute(
+                "IF NOT EXISTS (SELECT 1 FROM Paper_Categories WHERE paper_id = ? AND category_id = ?) "
+                "INSERT INTO Paper_Categories (paper_id, category_id) VALUES (?, ?)",
+                (paper_id, new_category_id, paper_id, new_category_id)
+            )
+
+        # Log upload activity
+        cursor.execute(
+            "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'UPLOAD')",
+            (user_id, paper_id)
+        )
 
         conn.commit()
 
@@ -389,6 +531,8 @@ def delete_paper(paper_id):
 @jwt_required()
 def add_review(paper_id):
     """Add a review/rating to a paper."""
+    claims = get_jwt()
+    role_id = claims.get('role_id')
     user_id = get_jwt_identity()
     data = request.get_json()
     rating = data.get('rating')
@@ -400,6 +544,21 @@ def add_review(paper_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        cursor.execute(
+            """SELECT p.uploaded_by, COALESCE(pr.flagged, 0) AS flagged
+               FROM Papers p
+               LEFT JOIN PlagiarismReports pr ON p.paper_id = pr.paper_id
+               WHERE p.paper_id = ?""",
+            (paper_id,)
+        )
+        paper_row = cursor.fetchone()
+        if not paper_row:
+            return jsonify({'error': 'Paper not found'}), 404
+
+        uploaded_by, flagged = paper_row
+        if flagged and role_id != 1 and str(uploaded_by) != str(user_id):
+            return jsonify({'error': 'This paper is under plagiarism review and is not visible yet.'}), 403
+
         cursor.execute(
             "INSERT INTO Reviews (user_id, paper_id, rating, comment) VALUES (?, ?, ?, ?)",
             (user_id, paper_id, rating, comment)

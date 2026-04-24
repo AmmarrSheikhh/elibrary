@@ -1,14 +1,23 @@
 import re
-from collections import Counter
 from utils.db import get_db_connection, rows_to_dicts
 
 PLAGIARISM_THRESHOLD = 20.0  # percent
+
+STOPWORDS = {
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'he',
+    'her', 'hers', 'him', 'his', 'i', 'if', 'in', 'into', 'is', 'it', 'its', 'me',
+    'my', 'of', 'on', 'or', 'our', 'ours', 'she', 'that', 'the', 'their', 'theirs',
+    'them', 'they', 'this', 'to', 'was', 'we', 'were', 'what', 'when', 'where',
+    'which', 'who', 'why', 'will', 'with', 'you', 'your', 'yours', 'hi', 'hello',
+    'im', 'am'
+}
 
 def tokenize(text):
     """Tokenize text into lowercase words."""
     if not text:
         return []
-    return re.findall(r'\b[a-z]{3,}\b', text.lower())
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    return [w for w in words if len(w) >= 2 and w not in STOPWORDS]
 
 def get_ngrams(tokens, n=3):
     """Generate n-grams from token list."""
@@ -25,23 +34,63 @@ def compute_similarity(text1, text2):
     if not tokens1 or not tokens2:
         return 0.0
 
-    # Keyword overlap (Jaccard similarity)
+    # Keyword overlap
     set1 = set(tokens1)
     set2 = set(tokens2)
     intersection = set1 & set2
     union = set1 | set2
     jaccard = len(intersection) / len(union) if union else 0
+    containment = len(intersection) / min(len(set1), len(set2)) if set1 and set2 else 0
 
-    # Bigram overlap
+    # N-gram overlap
     bigrams1 = set(get_ngrams(tokens1, 2))
     bigrams2 = set(get_ngrams(tokens2, 2))
     bigram_intersection = bigrams1 & bigrams2
     bigram_union = bigrams1 | bigrams2
     bigram_sim = len(bigram_intersection) / len(bigram_union) if bigram_union else 0
 
-    # Weighted combination
-    similarity = (0.4 * jaccard + 0.6 * bigram_sim) * 100
+    trigrams1 = set(get_ngrams(tokens1, 3))
+    trigrams2 = set(get_ngrams(tokens2, 3))
+    trigram_intersection = trigrams1 & trigrams2
+    trigram_union = trigrams1 | trigrams2
+    trigram_sim = len(trigram_intersection) / len(trigram_union) if trigram_union else 0
+
+    # Penalize very short text comparisons to avoid inflated scores on tiny abstracts.
+    min_len = min(len(tokens1), len(tokens2))
+    min_unique = min(len(set1), len(set2))
+    length_factor = min(1.0, min_len / 15.0)
+    uniqueness_factor = min(1.0, min_unique / 8.0)
+
+    base_similarity = (
+        0.45 * containment +
+        0.30 * jaccard +
+        0.15 * bigram_sim +
+        0.10 * trigram_sim
+    )
+
+    similarity = base_similarity * length_factor * uniqueness_factor * 100
     return round(similarity, 2)
+
+
+def find_best_match(source_paper_id, source_abstract, candidate_papers):
+    """Find the most similar paper to source abstract from candidate papers."""
+    best_match = None
+    best_score = 0.0
+
+    for paper in candidate_papers:
+        if paper.get('paper_id') == source_paper_id:
+            continue
+
+        score = compute_similarity(source_abstract, paper.get('abstract'))
+        if score > best_score:
+            best_score = score
+            best_match = {
+                'paper_id': paper.get('paper_id'),
+                'title': paper.get('title'),
+                'similarity_score': score,
+            }
+
+    return best_match
 
 def check_plagiarism(new_paper_id, new_abstract):
     """
@@ -54,16 +103,15 @@ def check_plagiarism(new_paper_id, new_abstract):
     try:
         # Get all existing papers except the new one
         cursor.execute(
-            "SELECT paper_id, abstract FROM Papers WHERE paper_id != ? AND abstract IS NOT NULL",
+            """SELECT paper_id, title, abstract
+               FROM Papers
+               WHERE paper_id != ? AND abstract IS NOT NULL""",
             (new_paper_id,)
         )
         existing = rows_to_dicts(cursor.fetchall(), cursor)
 
-        max_score = 0.0
-        for paper in existing:
-            score = compute_similarity(new_abstract, paper['abstract'])
-            if score > max_score:
-                max_score = score
+        best_match = find_best_match(new_paper_id, new_abstract, existing)
+        max_score = best_match['similarity_score'] if best_match else 0.0
 
         flagged = 1 if max_score >= PLAGIARISM_THRESHOLD else 0
 
@@ -81,7 +129,13 @@ def check_plagiarism(new_paper_id, new_abstract):
         )
         conn.commit()
 
-        return {'similarity_score': max_score, 'flagged': bool(flagged)}
+        return {
+            'similarity_score': max_score,
+            'flagged': bool(flagged),
+            'matched_paper_id': best_match['paper_id'] if best_match else None,
+            'matched_paper_title': best_match['title'] if best_match else None,
+            'matched_similarity_score': best_match['similarity_score'] if best_match else 0.0,
+        }
 
     finally:
         conn.close()

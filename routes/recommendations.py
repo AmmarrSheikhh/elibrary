@@ -1,5 +1,5 @@
 from flask import jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from flask import Blueprint
 from utils.db import get_db_connection, rows_to_dicts
 
@@ -17,6 +17,7 @@ def get_recommendations():
     4. Return top 10 recommendations
     """
     user_id = get_jwt_identity()
+    role_id = get_jwt().get('role_id')
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -45,6 +46,12 @@ def get_recommendations():
 
         if not category_weights:
             # Cold start: return most viewed papers
+            visibility_clause = ""
+            params = []
+            if role_id != 1:
+                visibility_clause = "WHERE COALESCE(pr.flagged, 0) = 0 OR p.uploaded_by = ?"
+                params.append(user_id)
+
             cursor.execute("""
                 SELECT TOP 10
                        p.paper_id,
@@ -68,8 +75,10 @@ def get_recommendations():
                        'Popular' AS reason
                 FROM Papers p
                 LEFT JOIN Paper_Statistics ps ON p.paper_id = ps.paper_id
+                LEFT JOIN PlagiarismReports pr ON p.paper_id = pr.paper_id
+            """ + visibility_clause + """
                 ORDER BY COALESCE(ps.views, 0) DESC, p.paper_id DESC
-            """)
+            """, params)
             return jsonify({
                 'recommendations': rows_to_dicts(cursor.fetchall(), cursor),
                 'type': 'popular'
@@ -83,6 +92,12 @@ def get_recommendations():
             f"WHEN pc.category_id = {int(cid)} THEN {int(weight)}"
             for cid, weight in category_weights.items()
         ])
+
+        visibility_clause = ""
+        extra_params = []
+        if role_id != 1:
+            visibility_clause = "AND (COALESCE(pr.flagged, 0) = 0 OR p.uploaded_by = ?)"
+            extra_params.append(user_id)
 
         cursor.execute(f"""
             SELECT TOP 10
@@ -111,13 +126,15 @@ def get_recommendations():
             FROM Papers p
             JOIN Paper_Categories pc ON p.paper_id = pc.paper_id
             LEFT JOIN Paper_Statistics ps ON p.paper_id = ps.paper_id
+                        LEFT JOIN PlagiarismReports pr ON p.paper_id = pr.paper_id
             WHERE pc.category_id IN ({placeholders})
               AND p.paper_id NOT IN (
                   SELECT DISTINCT paper_id FROM UserActivity WHERE user_id = ? AND paper_id IS NOT NULL
               )
+                            {visibility_clause}
             GROUP BY p.paper_id, p.title, p.abstract, p.publication_year, ps.views, ps.downloads
             ORDER BY score DESC
-        """, category_ids + [user_id])
+                """, category_ids + [user_id] + extra_params)
 
         recommendations = rows_to_dicts(cursor.fetchall(), cursor)
 
@@ -125,6 +142,13 @@ def get_recommendations():
         if len(recommendations) < 5:
             seen_ids = [r['paper_id'] for r in recommendations]
             excluded = ','.join([str(i) for i in seen_ids]) if seen_ids else '0'
+
+            trending_visibility_clause = ""
+            trending_params = []
+            if role_id != 1:
+                trending_visibility_clause = "AND (COALESCE(pr.flagged, 0) = 0 OR p.uploaded_by = ?)"
+                trending_params.append(user_id)
+
             cursor.execute(f"""
                 SELECT TOP 5
                        p.paper_id,
@@ -148,9 +172,11 @@ def get_recommendations():
                        'Trending' AS reason
                 FROM Papers p
                 LEFT JOIN Paper_Statistics ps ON p.paper_id = ps.paper_id
+                LEFT JOIN PlagiarismReports pr ON p.paper_id = pr.paper_id
                 WHERE p.paper_id NOT IN ({excluded})
+                {trending_visibility_clause}
                 ORDER BY COALESCE(ps.views, 0) DESC, p.paper_id DESC
-            """)
+            """, trending_params)
             recommendations += rows_to_dicts(cursor.fetchall(), cursor)
 
         return jsonify({'recommendations': recommendations, 'type': 'personalized'})

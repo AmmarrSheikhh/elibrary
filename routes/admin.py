@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from utils.db import get_db_connection, rows_to_dicts, dict_from_row
+from utils.plagiarism import find_best_match
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -103,13 +104,26 @@ def get_plagiarism_reports():
         cursor.execute(f"""
             SELECT pr.report_id, pr.paper_id, pr.similarity_score, pr.flagged,
                    p.title, u.name AS uploaded_by
+                   ,p.abstract
             FROM PlagiarismReports pr
             JOIN Papers p ON pr.paper_id = p.paper_id
             JOIN Users u ON p.uploaded_by = u.user_id
             {where}
             ORDER BY pr.similarity_score DESC
         """)
-        return jsonify(rows_to_dicts(cursor.fetchall(), cursor))
+        reports = rows_to_dicts(cursor.fetchall(), cursor)
+
+        cursor.execute("SELECT paper_id, title, abstract FROM Papers WHERE abstract IS NOT NULL")
+        candidates = rows_to_dicts(cursor.fetchall(), cursor)
+
+        for report in reports:
+            best_match = find_best_match(report['paper_id'], report.get('abstract'), candidates)
+            report['matched_paper_id'] = best_match['paper_id'] if best_match else None
+            report['matched_paper_title'] = best_match['title'] if best_match else None
+            report['matched_similarity_score'] = best_match['similarity_score'] if best_match else 0.0
+            report.pop('abstract', None)
+
+        return jsonify(reports)
     finally:
         conn.close()
 
