@@ -1,6 +1,6 @@
 # Nexus E-Library Management System
 
-A full-stack research paper management platform built with **Flask** (Python) backend and a Single-Page Application frontend. Connects to **Microsoft SQL Server (MSSQL)** using your existing `ELIB2` database schema.
+A full-stack research paper management platform built with **Flask** (Python) backend and a Single-Page Application frontend. Connects to **Microsoft SQL Server (MSSQL)**
 
 ---
 
