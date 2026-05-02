@@ -89,6 +89,84 @@ function getApiErrorMessage(payload, fallback) {
   return fallback;
 }
 
+function resetInputs(container) {
+  if (!container) return;
+  const fields = container.querySelectorAll('input, textarea, select');
+  fields.forEach(field => {
+    if (field.tagName === 'SELECT') {
+      if (field.multiple) {
+        Array.from(field.options).forEach(opt => { opt.selected = false; });
+      } else {
+        field.selectedIndex = 0;
+      }
+      return;
+    }
+
+    if (field.type === 'checkbox' || field.type === 'radio') {
+      field.checked = false;
+      return;
+    }
+
+    field.value = '';
+  });
+}
+
+function resetAuthForm(formId) {
+  const form = document.getElementById(formId);
+  if (form) resetInputs(form);
+}
+
+function resetReviewForm() {
+  selectedStars = 0;
+  const comment = document.getElementById('review-comment');
+  if (comment) comment.value = '';
+  document.querySelectorAll('.star-btn').forEach(btn => btn.classList.remove('active'));
+}
+
+function resetPageFields(pageId) {
+  const page = document.getElementById(pageId);
+  if (!page) return;
+  resetInputs(page);
+
+  if (pageId === 'page-papers') {
+    const panel = document.getElementById('filter-panel');
+    if (panel) panel.style.display = 'none';
+  }
+
+  if (pageId === 'page-upload') {
+    const result = document.getElementById('upload-result');
+    if (result) result.style.display = 'none';
+  }
+
+  if (pageId === 'page-paper-detail') {
+    resetReviewForm();
+  }
+}
+
+function setupAuthEnterSubmit() {
+  ['login-email', 'login-password'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        login();
+      }
+    });
+  });
+
+  ['reg-name', 'reg-email', 'reg-password'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        register();
+      }
+    });
+  });
+}
+
 function formatDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
@@ -134,6 +212,11 @@ async function switchAuthTab(tab) {
   });
   document.getElementById('login-form').style.display = tab === 'login' ? 'block' : 'none';
   document.getElementById('register-form').style.display = tab === 'register' ? 'block' : 'none';
+  if (tab === 'login') {
+    resetAuthForm('register-form');
+  } else {
+    resetAuthForm('login-form');
+  }
   document.getElementById('auth-error').style.display = 'none';
 }
 
@@ -202,6 +285,8 @@ async function register() {
 function logout() {
   clearToken();
   currentUser = null;
+  resetAuthForm('login-form');
+  resetAuthForm('register-form');
   document.getElementById('auth-screen').style.display = 'flex';
   document.getElementById('main-app').style.display = 'none';
 }
@@ -209,6 +294,8 @@ function logout() {
 // ── APP INIT ───────────────────────────────────
 
 async function bootstrap() {
+  setupAuthEnterSubmit();
+
   // Load institutions for register form.
   try {
     const res = await fetch(API + '/users/institutions');
@@ -262,6 +349,11 @@ function initApp() {
 // ── NAVIGATION ─────────────────────────────────
 
 function showPage(name) {
+  const activePage = document.querySelector('.page.active');
+  if (activePage && activePage.id !== `page-${name}`) {
+    resetPageFields(activePage.id);
+  }
+
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
 
@@ -278,6 +370,11 @@ function showPage(name) {
   else if (name === 'recommendations') loadRecommendations();
   else if (name === 'upload') loadUploadForm();
   else if (name === 'admin') loadAdmin();
+}
+
+function showAdminTab(tab) {
+  showPage('admin');
+  switchAdminTab(tab);
 }
 
 // ── DASHBOARD ──────────────────────────────────
@@ -740,6 +837,14 @@ async function loadRecommendations() {
 // ── UPLOAD ─────────────────────────────────────
 
 async function loadUploadForm() {
+  const yearInput = document.getElementById('up-year');
+  const currentYear = new Date().getFullYear();
+  if (yearInput) {
+    yearInput.max = currentYear;
+    yearInput.placeholder = currentYear;
+    if (parseInt(yearInput.value, 10) > currentYear) yearInput.value = '';
+  }
+
   // Load authors
   const authRes = await apiFetch('/papers/authors');
   if (authRes && authRes.ok) {
@@ -775,9 +880,14 @@ async function loadUploadForm() {
 async function uploadPaper() {
   const title = document.getElementById('up-title').value.trim();
   const abstract = document.getElementById('up-abstract').value.trim();
-  const publication_year = parseInt(document.getElementById('up-year').value);
+  const publication_year = parseInt(document.getElementById('up-year').value, 10);
+  const currentYear = new Date().getFullYear();
 
   if (!title || !publication_year) return showToast('Title and year are required', 'error');
+  if (publication_year > currentYear) {
+    return showToast(`Publication year must be ${currentYear} or earlier`, 'error');
+  }
+  if (publication_year < 1900) return showToast('Publication year must be 1900 or later', 'error');
 
   const authorSel = document.getElementById('up-authors');
   const author_ids = Array.from(authorSel.selectedOptions).map(o => parseInt(o.value));
@@ -891,6 +1001,17 @@ async function loadAdminStats() {
 }
 
 function switchAdminTab(tab) {
+  const sectionMap = {
+    overview: 'admin-overview',
+    users: 'admin-users',
+    plagiarism: 'admin-plagiarism'
+  };
+  const nextSectionId = sectionMap[tab] || 'admin-overview';
+  const currentSection = document.querySelector('.admin-section.active');
+  if (currentSection && currentSection.id !== nextSectionId) {
+    resetInputs(currentSection);
+  }
+
   document.querySelectorAll('.admin-tab').forEach(t => {
     t.classList.toggle('active', t.textContent.toLowerCase().includes(tab.toLowerCase()) ||
       (tab === 'overview' && t.textContent === 'Overview') ||
@@ -959,7 +1080,7 @@ async function loadAdminUsers() {
             <td style="font-family:var(--font-mono);font-size:0.8rem">${u.email}</td>
             <td><span class="role-badge role-${u.role_id}">${u.role_name}</span></td>
             <td>${u.institution_name || '—'}</td>
-            <td>${u.user_id !== currentUser.user_id ? `<button class="btn-danger btn-sm" onclick="deleteUser(${u.user_id})">Delete</button>` : '<span class="text-muted">You</span>'}</td>
+            <td>${u.user_id !== currentUser.user_id ? `<button class="btn-danger btn-sm" onclick='confirmDeleteUser(${u.user_id}, ${JSON.stringify(u.name)}, ${JSON.stringify(u.email)})'>Delete</button>` : '<span class="text-muted">You</span>'}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -980,13 +1101,30 @@ function clearAdminUserFilters() {
   loadAdminUsers();
 }
 
+function confirmDeleteUser(userId, name, email) {
+  const displayName = name || 'this user';
+  const displayEmail = email ? `<div class="confirm-email">${email}</div>` : '';
+  const html = `
+    <div class="confirm-modal">
+      <div class="confirm-title">Delete User</div>
+      <div class="confirm-body">Are you sure you want to delete <strong>${displayName}</strong>? This action cannot be undone.</div>
+      ${displayEmail}
+      <div class="confirm-actions">
+        <button class="btn-ghost" onclick="closeModalDirect()">Cancel</button>
+        <button class="btn-danger" onclick="deleteUser(${userId})">Delete User</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+}
+
 async function deleteUser(userId) {
-  if (!confirm('Delete this user? This action cannot be undone.')) return;
   const res = await apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
   if (!res) return;
   const d = await readApiResponse(res);
   if (!res.ok) return showToast(getApiErrorMessage(d, 'Failed to delete user'), 'error');
 
+  closeModalDirect();
   showToast('User deleted', 'success');
   loadAdminUsers();
 }

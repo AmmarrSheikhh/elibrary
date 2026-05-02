@@ -127,22 +127,22 @@
         </div>
       </div>
       <div class="stats-grid" id="dash-stats">
-        <div class="stat-card">
+        <button type="button" class="stat-card stat-link" onclick="showPage('papers')">
           <div class="stat-num" id="stat-papers">—</div>
           <div class="stat-label">Total Papers</div>
-        </div>
-        <div class="stat-card">
+        </button>
+        <button type="button" class="stat-card stat-link" onclick="showPage('papers')">
           <div class="stat-num" id="stat-views">—</div>
           <div class="stat-label">Total Views</div>
-        </div>
-        <div class="stat-card">
+        </button>
+        <button type="button" class="stat-card stat-link" onclick="showPage('papers')">
           <div class="stat-num" id="stat-downloads">—</div>
           <div class="stat-label">Downloads</div>
-        </div>
-        <div class="stat-card admin-only">
+        </button>
+        <button type="button" class="stat-card stat-link admin-only" onclick="showAdminTab('plagiarism')">
           <div class="stat-num flagged-num" id="stat-flagged">—</div>
           <div class="stat-label">Flagged Reports</div>
-        </div>
+        </button>
       </div>
       <div class="dash-grid">
         <div class="dash-section">
@@ -243,7 +243,7 @@
         <div class="form-row">
           <div class="form-group">
             <label>Publication Year *</label>
-            <input type="number" id="up-year" placeholder="2024" min="1900" max="2030">
+            <input type="number" id="up-year" placeholder="2024" min="1900" max="2100">
           </div>
         </div>
         <div class="form-group">
