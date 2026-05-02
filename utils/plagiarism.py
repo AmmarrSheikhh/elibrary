@@ -113,7 +113,16 @@ def check_plagiarism(new_paper_id, new_abstract):
         best_match = find_best_match(new_paper_id, new_abstract, existing)
         max_score = best_match['similarity_score'] if best_match else 0.0
 
-        flagged = 1 if max_score >= PLAGIARISM_THRESHOLD else 0
+        cited_ids = set()
+        if best_match:
+            cursor.execute(
+                "SELECT cited_paper_id FROM Citations WHERE citing_paper_id = ?",
+                (new_paper_id,)
+            )
+            cited_ids = {row[0] for row in cursor.fetchall()}
+
+        citation_match = bool(best_match and best_match['paper_id'] in cited_ids)
+        flagged = 1 if max_score >= PLAGIARISM_THRESHOLD and not citation_match else 0
 
         # Insert or update plagiarism report
         cursor.execute(
@@ -132,6 +141,7 @@ def check_plagiarism(new_paper_id, new_abstract):
         return {
             'similarity_score': max_score,
             'flagged': bool(flagged),
+            'citation_match': citation_match,
             'matched_paper_id': best_match['paper_id'] if best_match else None,
             'matched_paper_title': best_match['title'] if best_match else None,
             'matched_similarity_score': best_match['similarity_score'] if best_match else 0.0,

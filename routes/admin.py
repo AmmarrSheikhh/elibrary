@@ -38,6 +38,48 @@ def delete_paper_cascade(cursor, paper_id):
     cursor.execute("DELETE FROM Papers WHERE paper_id = ?", (paper_id,))
 
 
+def fetch_paper_summary(cursor, paper_id):
+    cursor.execute(
+        """
+        SELECT p.paper_id, p.title, p.abstract, p.publication_year,
+               p.upload_date, u.name AS uploader_name
+        FROM Papers p
+        LEFT JOIN Users u ON p.uploaded_by = u.user_id
+        WHERE p.paper_id = ?
+        """,
+        (paper_id,)
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+
+    paper = dict_from_row(row, cursor)
+
+    cursor.execute(
+        """
+        SELECT a.author_id, a.author_name, a.affiliation
+        FROM Authors a
+        JOIN Paper_Authors pa ON a.author_id = pa.author_id
+        WHERE pa.paper_id = ?
+        """,
+        (paper_id,)
+    )
+    paper['authors'] = rows_to_dicts(cursor.fetchall(), cursor)
+
+    cursor.execute(
+        """
+        SELECT c.category_id, c.category_name, c.description
+        FROM Categories c
+        JOIN Paper_Categories pc ON c.category_id = pc.category_id
+        WHERE pc.paper_id = ?
+        """,
+        (paper_id,)
+    )
+    paper['categories'] = rows_to_dicts(cursor.fetchall(), cursor)
+
+    return paper
+
+
 @admin_bp.route('/users', methods=['GET'])
 @jwt_required()
 @require_admin()
@@ -156,6 +198,45 @@ def get_plagiarism_reports():
         conn.close()
 
 
+@admin_bp.route('/plagiarism/<int:report_id>', methods=['GET'])
+@jwt_required()
+@require_admin()
+def get_plagiarism_report_detail(report_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT report_id, paper_id, similarity_score, flagged FROM PlagiarismReports WHERE report_id = ?",
+            (report_id,)
+        )
+        report_row = cursor.fetchone()
+        if not report_row:
+            return jsonify({'error': 'Report not found'}), 404
+
+        report = dict_from_row(report_row, cursor)
+        paper = fetch_paper_summary(cursor, report['paper_id'])
+
+        cursor.execute("SELECT paper_id, title, abstract FROM Papers WHERE abstract IS NOT NULL")
+        candidates = rows_to_dicts(cursor.fetchall(), cursor)
+        best_match = find_best_match(report['paper_id'], paper.get('abstract') if paper else '', candidates)
+
+        match = None
+        if best_match:
+            match = fetch_paper_summary(cursor, best_match['paper_id'])
+            if match:
+                match['similarity_score'] = best_match['similarity_score']
+
+        return jsonify({
+            'report_id': report['report_id'],
+            'similarity_score': report['similarity_score'],
+            'flagged': bool(report['flagged']),
+            'paper': paper,
+            'match': match
+        })
+    finally:
+        conn.close()
+
+
 @admin_bp.route('/plagiarism/<int:report_id>/resolve', methods=['POST'])
 @jwt_required()
 @require_admin()
@@ -165,6 +246,7 @@ def resolve_plagiarism(report_id):
     if action not in {'approve', 'reject'}:
         return jsonify({'error': "Invalid action. Use 'approve' or 'reject'."}), 400
 
+    admin_user_id = get_jwt_identity()
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -180,9 +262,17 @@ def resolve_plagiarism(report_id):
                 "UPDATE PlagiarismReports SET flagged = 0 WHERE report_id = ?",
                 (report_id,)
             )
+            cursor.execute(
+                "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'PLAGIARISM_APPROVE')",
+                (admin_user_id, paper_id)
+            )
             message = 'Paper approved and report resolved'
         else:
             delete_paper_cascade(cursor, paper_id)
+            cursor.execute(
+                "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'PLAGIARISM_REJECT')",
+                (admin_user_id, None)
+            )
             message = 'Paper rejected and deleted'
 
         conn.commit()

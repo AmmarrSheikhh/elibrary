@@ -40,6 +40,22 @@ function showToast(msg, type = 'info') {
   setTimeout(() => { t.className = 'toast'; }, 3500);
 }
 
+function openModal(html, options = {}) {
+  const modal = document.getElementById('modal');
+  const body = document.getElementById('modal-body');
+  const content = modal.querySelector('.modal-content');
+  body.innerHTML = html;
+  content.classList.toggle('resolve-large', Boolean(options.large));
+  modal.classList.add('open');
+}
+
+function closeModalDirect() {
+  const modal = document.getElementById('modal');
+  const content = modal.querySelector('.modal-content');
+  modal.classList.remove('open');
+  content.classList.remove('resolve-large');
+}
+
 function showError(id, msg) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -83,6 +99,19 @@ function stars(n) {
   return '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
 }
 
+function enableMultiSelectToggle(select) {
+  if (!select || select.dataset.multiToggle === '1') return;
+  select.dataset.multiToggle = '1';
+  select.addEventListener('mousedown', (event) => {
+    if (event.target.tagName !== 'OPTION') return;
+    event.preventDefault();
+    const option = event.target;
+    option.selected = !option.selected;
+    select.focus();
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 function getActivityTitle(activity) {
   if (activity?.title) return activity.title;
   const type = (activity?.activity_type || '').toLowerCase();
@@ -90,7 +119,9 @@ function getActivityTitle(activity) {
     review: 'Review added',
     unbookmark: 'Bookmark removed',
     delete_paper: 'Deleted paper',
-    delete_user: 'Deleted user'
+    delete_user: 'Deleted user',
+    plagiarism_approve: 'Plagiarism approved',
+    plagiarism_reject: 'Plagiarism rejected'
   };
   return labelMap[type] || 'Unknown Paper';
 }
@@ -715,6 +746,7 @@ async function loadUploadForm() {
     const authors = await authRes.json();
     const sel = document.getElementById('up-authors');
     sel.innerHTML = authors.map(a => `<option value="${a.author_id}">${a.author_name} · ${a.affiliation || ''}</option>`).join('');
+    enableMultiSelectToggle(sel);
   }
 
   // Load categories
@@ -723,6 +755,7 @@ async function loadUploadForm() {
     const cats = await catRes.json();
     const sel = document.getElementById('up-categories');
     sel.innerHTML = cats.map(c => `<option value="${c.category_id}">${c.category_name}</option>`).join('');
+    enableMultiSelectToggle(sel);
   }
 
   // Load citation candidates
@@ -733,6 +766,7 @@ async function loadUploadForm() {
     sel.innerHTML = cites.map(p => `
       <option value="${p.paper_id}">${p.title}${p.publication_year ? ` · ${p.publication_year}` : ''}</option>
     `).join('');
+    enableMultiSelectToggle(sel);
   }
 
   document.getElementById('upload-result').style.display = 'none';
@@ -812,11 +846,14 @@ async function uploadPaper() {
     const matchInfo = plag.matched_paper_title
       ? `<br>Closest match checked: <strong>${plag.matched_paper_title}</strong> (${plag.matched_similarity_score}%)`
       : '';
+    const citedNote = plag.citation_match
+      ? '<br><span class="text-muted">Closest match is cited, so it was not flagged.</span>'
+      : '';
 
     resultDiv.className = 'plag-result plag-low';
     resultDiv.innerHTML = `
       <strong>✓ Paper Uploaded Successfully!</strong><br>
-      Plagiarism check passed. Similarity score: <strong>${plag.similarity_score}%</strong>${matchInfo}
+      Plagiarism check passed. Similarity score: <strong>${plag.similarity_score}%</strong>${matchInfo}${citedNote}
     `;
     showToast('Paper uploaded successfully!', 'success');
   }
@@ -1004,23 +1041,90 @@ async function loadPlagiarismReports() {
   `;
 }
 
+function renderPlagiarismPaperCard(paper, heading, extraMeta = '') {
+  if (!paper) {
+    return `
+      <div class="resolve-card">
+        <div class="section-title">${heading}</div>
+        <div class="text-muted">No match found.</div>
+      </div>
+    `;
+  }
+
+  const authors = paper.authors?.length
+    ? paper.authors.map(a => `<span class="tag">${a.author_name}${a.affiliation ? ` · ${a.affiliation}` : ''}</span>`).join('')
+    : '<span class="text-muted">—</span>';
+  const categories = paper.categories?.length
+    ? paper.categories.map(c => `<span class="tag">${c.category_name}</span>`).join('')
+    : '<span class="text-muted">—</span>';
+  const abstract = paper.abstract
+    ? `<div class="resolve-abstract">${paper.abstract}</div>`
+    : '<div class="text-muted">No abstract available.</div>';
+
+  return `
+    <div class="resolve-card">
+      <div class="section-title">${heading}</div>
+      <div class="resolve-paper-title">${paper.title || 'Untitled Paper'}</div>
+      <div class="resolve-meta">
+        <div class="meta-chip">ID <span>#${paper.paper_id}</span></div>
+        ${paper.publication_year ? `<div class="meta-chip">Year <span>${paper.publication_year}</span></div>` : ''}
+        ${paper.uploader_name ? `<div class="meta-chip">Uploader <span>${paper.uploader_name}</span></div>` : ''}
+        ${extraMeta}
+      </div>
+      ${abstract}
+      <div class="resolve-row">
+        <div class="resolve-label">Authors</div>
+        <div class="paper-tags">${authors}</div>
+      </div>
+      <div class="resolve-row">
+        <div class="resolve-label">Categories</div>
+        <div class="paper-tags">${categories}</div>
+      </div>
+    </div>
+  `;
+}
+
 async function resolveReport(reportId) {
-  const decision = prompt(
-    'Review decision for this flagged paper:\nType APPROVE to allow it, or REJECT to delete it. Leave empty to cancel.'
-  );
+  const res = await apiFetch(`/admin/plagiarism/${reportId}`);
+  if (!res) return;
 
-  if (!decision) return;
-  const action = decision.trim().toLowerCase();
-
-  if (!['approve', 'reject'].includes(action)) {
-    showToast('Please type APPROVE or REJECT', 'error');
+  const data = await readApiResponse(res);
+  if (!res.ok || !data) {
+    showToast(getApiErrorMessage(data, 'Failed to load report details'), 'error');
     return;
   }
 
-  if (action === 'reject' && !confirm('Rejecting will permanently delete this paper and related data. Continue?')) {
-    return;
-  }
+  const matchMeta = data.match?.similarity_score !== undefined
+    ? `<div class="meta-chip">Similarity <span>${data.match.similarity_score}%</span></div>`
+    : '';
+  const flaggedCard = renderPlagiarismPaperCard(data.paper, 'Flagged Paper');
+  const matchCard = renderPlagiarismPaperCard(data.match, 'Closest Match', matchMeta);
 
+  const html = `
+    <div class="resolve-modal">
+      <div class="resolve-header">
+        <div>
+          <div class="resolve-title">Resolve Plagiarism Report #${data.report_id}</div>
+          <div class="resolve-sub">Similarity ${data.similarity_score}% · ${data.flagged ? 'Flagged' : 'Clear'}</div>
+        </div>
+        <button class="btn-ghost btn-sm" onclick="closeModalDirect()">Close</button>
+      </div>
+      <div class="resolve-grid">
+        ${flaggedCard}
+        ${matchCard}
+      </div>
+      <div class="resolve-note">Approving clears the report. Rejecting permanently deletes the paper and related data.</div>
+      <div class="resolve-actions">
+        <button class="btn-secondary" onclick="submitResolveReport(${data.report_id}, 'approve')">Approve</button>
+        <button class="btn-danger" onclick="submitResolveReport(${data.report_id}, 'reject')">Reject & Delete</button>
+      </div>
+    </div>
+  `;
+
+  openModal(html, { large: true });
+}
+
+async function submitResolveReport(reportId, action) {
   const res = await apiFetch(`/admin/plagiarism/${reportId}/resolve`, {
     method: 'POST',
     body: JSON.stringify({ action })
@@ -1033,8 +1137,10 @@ async function resolveReport(reportId) {
     return;
   }
 
+  closeModalDirect();
   showToast(action === 'approve' ? 'Paper approved' : 'Paper rejected and deleted', 'success');
   loadPlagiarismReports();
+  loadAdminStats();
 }
 
 async function deletePaper(paperId) {
@@ -1050,7 +1156,7 @@ async function deletePaper(paperId) {
 
 function closeModal(e) {
   if (e.target === document.getElementById('modal')) {
-    document.getElementById('modal').classList.remove('open');
+    closeModalDirect();
   }
 }
 
