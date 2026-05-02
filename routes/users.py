@@ -84,6 +84,10 @@ def remove_bookmark(paper_id):
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM Bookmarks WHERE user_id=? AND paper_id=?", (user_id, paper_id))
+        cursor.execute(
+            "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'UNBOOKMARK')",
+            (user_id, paper_id)
+        )
         conn.commit()
         return jsonify({'message': 'Bookmark removed'})
     finally:

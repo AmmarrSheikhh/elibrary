@@ -247,7 +247,7 @@
           </div>
         </div>
         <div class="form-group">
-          <label>Authors</label>
+          <label>Authors *</label>
           <select id="up-authors" multiple class="multi-select">
           </select>
         </div>
@@ -256,13 +256,18 @@
           <input type="text" id="new-author-affil" placeholder="Affiliation">
         </div>
         <div class="form-group">
-          <label>Categories</label>
+          <label>Categories *</label>
           <select id="up-categories" multiple class="multi-select">
           </select>
         </div>
         <div class="form-row-inline">
           <input type="text" id="new-category-name" placeholder="Or add new category name">
           <input type="text" id="new-category-desc" placeholder="Category description">
+        </div>
+        <div class="form-group">
+          <label>Citations (papers this work cites)</label>
+          <select id="up-citations" multiple class="multi-select">
+          </select>
         </div>
         <button class="btn-primary" onclick="uploadPaper()">Submit Paper →</button>
         <div id="upload-result" style="display:none" class="plag-result"></div>
@@ -283,6 +288,17 @@
         <div class="stats-grid" id="admin-stats-grid"></div>
       </div>
       <div id="admin-users" class="admin-section" style="display:none">
+        <div class="filter-row admin-user-filters">
+          <label for="admin-user-role">Role</label>
+          <select id="admin-user-role" onchange="loadAdminUsers()">
+            <option value="all">All</option>
+            <option value="student">Students only</option>
+            <option value="researcher">Researchers only</option>
+            <option value="admin">Admins only</option>
+          </select>
+          <input type="text" id="admin-user-search" placeholder="Search by name or email" oninput="debounceAdminUserSearch()">
+          <button class="btn-ghost" onclick="clearAdminUserFilters()">Clear</button>
+        </div>
         <div id="admin-users-table"></div>
       </div>
       <div id="admin-plagiarism" class="admin-section" style="display:none">

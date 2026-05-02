@@ -45,14 +45,38 @@ def list_users():
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("""
+        role_param = (request.args.get('role') or '').strip().lower()
+        search = (request.args.get('q') or '').strip()
+
+        role_map = {'admin': 1, 'researcher': 2, 'student': 3}
+        role_id = None
+        if role_param and role_param != 'all':
+            if role_param.isdigit():
+                role_id = int(role_param)
+            else:
+                role_id = role_map.get(role_param)
+
+        conditions = []
+        params = []
+        if role_id:
+            conditions.append("u.role_id = ?")
+            params.append(role_id)
+        if search:
+            conditions.append("(u.name LIKE ? OR u.email LIKE ?)")
+            like = f"%{search}%"
+            params.extend([like, like])
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        cursor.execute(f"""
             SELECT u.user_id, u.name, u.email, u.role_id, r.role_name,
                    i.name AS institution_name
             FROM Users u
             JOIN Roles r ON u.role_id = r.role_id
             LEFT JOIN Institutions i ON u.institution_id = i.institution_id
+            {where_clause}
             ORDER BY u.user_id
-        """)
+        """, params)
         return jsonify(rows_to_dicts(cursor.fetchall(), cursor))
     finally:
         conn.close()
@@ -83,6 +107,10 @@ def delete_user(user_id):
         cursor.execute("DELETE FROM Bookmarks WHERE user_id = ?", (user_id,))
         cursor.execute("DELETE FROM Reviews WHERE user_id = ?", (user_id,))
         cursor.execute("DELETE FROM Users WHERE user_id = ?", (user_id,))
+        cursor.execute(
+            "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'DELETE_USER')",
+            (admin_user_id, None)
+        )
         conn.commit()
         return jsonify({'message': 'User deleted'})
     except Exception as e:

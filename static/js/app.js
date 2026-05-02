@@ -8,6 +8,7 @@ let currentPage = 1;
 let searchTimeout = null;
 let selectedStars = 0;
 let userBookmarks = new Set();
+let adminUserSearchTimeout = null;
 
 // ── UTILS ──────────────────────────────────────
 
@@ -80,6 +81,18 @@ function formatDate(d) {
 function stars(n) {
   if (!n) return '<span style="color:var(--text-muted)">No ratings</span>';
   return '★'.repeat(Math.round(n)) + '☆'.repeat(5 - Math.round(n));
+}
+
+function getActivityTitle(activity) {
+  if (activity?.title) return activity.title;
+  const type = (activity?.activity_type || '').toLowerCase();
+  const labelMap = {
+    review: 'Review added',
+    unbookmark: 'Bookmark removed',
+    delete_paper: 'Deleted paper',
+    delete_user: 'Deleted user'
+  };
+  return labelMap[type] || 'Unknown Paper';
 }
 
 // ── AUTH ───────────────────────────────────────
@@ -248,13 +261,17 @@ async function loadDashboard() {
       container.innerHTML = '<div class="text-muted">No activity yet. Start exploring papers!</div>';
       return;
     }
-    container.innerHTML = activity.slice(0, 8).map(a => `
+    container.innerHTML = activity.slice(0, 8).map(a => {
+      const activityType = (a.activity_type || 'activity').toLowerCase();
+      const activityLabel = (a.activity_type || 'Activity').replace(/_/g, ' ');
+      return `
       <div class="activity-item">
-        <span class="activity-badge badge-${a.activity_type.toLowerCase()}">${a.activity_type}</span>
-        <span class="activity-paper">${a.title || 'Unknown Paper'}</span>
+        <span class="activity-badge badge-${activityType}">${activityLabel}</span>
+        <span class="activity-paper">${getActivityTitle(a)}</span>
         <span class="activity-date">${formatDate(a.activity_date)}</span>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   // Admin stats
@@ -708,6 +725,16 @@ async function loadUploadForm() {
     sel.innerHTML = cats.map(c => `<option value="${c.category_id}">${c.category_name}</option>`).join('');
   }
 
+  // Load citation candidates
+  const citeRes = await apiFetch('/papers/citations');
+  if (citeRes && citeRes.ok) {
+    const cites = await citeRes.json();
+    const sel = document.getElementById('up-citations');
+    sel.innerHTML = cites.map(p => `
+      <option value="${p.paper_id}">${p.title}${p.publication_year ? ` · ${p.publication_year}` : ''}</option>
+    `).join('');
+  }
+
   document.getElementById('upload-result').style.display = 'none';
 }
 
@@ -722,11 +749,29 @@ async function uploadPaper() {
   const author_ids = Array.from(authorSel.selectedOptions).map(o => parseInt(o.value));
   const catSel = document.getElementById('up-categories');
   const category_ids = Array.from(catSel.selectedOptions).map(o => parseInt(o.value));
+  const citeSel = document.getElementById('up-citations');
+  const citation_ids = Array.from(citeSel?.selectedOptions || []).map(o => parseInt(o.value));
 
   const new_author_name = document.getElementById('new-author-name').value.trim();
   const new_author_affiliation = document.getElementById('new-author-affil').value.trim();
   const new_category_name = document.getElementById('new-category-name').value.trim();
   const new_category_description = document.getElementById('new-category-desc').value.trim();
+
+  if (new_author_affiliation && !new_author_name) {
+    return showToast('Author name is required when adding an affiliation', 'error');
+  }
+  if (new_author_name && !new_author_affiliation) {
+    return showToast('Affiliation is required for a new author', 'error');
+  }
+  if (!author_ids.length && !new_author_name) {
+    return showToast('Please select at least one author or add a new author', 'error');
+  }
+  if (new_category_description && !new_category_name) {
+    return showToast('Category name is required when adding a description', 'error');
+  }
+  if (!category_ids.length && !new_category_name) {
+    return showToast('Please select at least one category or add a new category', 'error');
+  }
 
   const res = await apiFetch('/papers', {
     method: 'POST',
@@ -736,6 +781,7 @@ async function uploadPaper() {
       publication_year,
       author_ids,
       category_ids,
+      citation_ids,
       new_author_name,
       new_author_affiliation,
       new_category_name,
@@ -778,6 +824,10 @@ async function uploadPaper() {
   // Reset form
   ['up-title', 'up-abstract', 'up-year', 'new-author-name', 'new-author-affil', 'new-category-name', 'new-category-desc'].forEach(id => {
     document.getElementById(id).value = '';
+  });
+  [authorSel, catSel, citeSel].forEach(sel => {
+    if (!sel) return;
+    Array.from(sel.options).forEach(o => { o.selected = false; });
   });
 }
 
@@ -834,7 +884,13 @@ function switchAdminTab(tab) {
 async function loadAdminUsers() {
   const container = document.getElementById('admin-users-table');
   container.innerHTML = '<div class="loading">Loading users...</div>';
-  const res = await apiFetch('/admin/users');
+  const roleFilter = document.getElementById('admin-user-role')?.value || 'all';
+  const searchQuery = document.getElementById('admin-user-search')?.value.trim() || '';
+  const params = new URLSearchParams();
+  if (roleFilter && roleFilter !== 'all') params.append('role', roleFilter);
+  if (searchQuery) params.append('q', searchQuery);
+
+  const res = await apiFetch(`/admin/users${params.toString() ? `?${params}` : ''}`);
   if (!res) {
     container.innerHTML = '<div class="error-msg">Session expired. Please sign in again.</div>';
     return;
@@ -845,6 +901,11 @@ async function loadAdminUsers() {
     return;
   }
   const users = await res.json();
+
+  if (!users.length) {
+    container.innerHTML = '<div class="empty-state"><span class="empty-icon">👤</span><p>No users found</p></div>';
+    return;
+  }
 
   container.innerHTML = `
     <table class="data-table">
@@ -867,6 +928,19 @@ async function loadAdminUsers() {
       </tbody>
     </table>
   `;
+}
+
+function debounceAdminUserSearch() {
+  clearTimeout(adminUserSearchTimeout);
+  adminUserSearchTimeout = setTimeout(() => loadAdminUsers(), 350);
+}
+
+function clearAdminUserFilters() {
+  const roleSel = document.getElementById('admin-user-role');
+  const searchInput = document.getElementById('admin-user-search');
+  if (roleSel) roleSel.value = 'all';
+  if (searchInput) searchInput.value = '';
+  loadAdminUsers();
 }
 
 async function deleteUser(userId) {

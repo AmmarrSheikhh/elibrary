@@ -374,6 +374,7 @@ def upload_paper():
     publication_year = data.get('publication_year')
     author_ids = parse_unique_ints(data.get('author_ids', []))
     category_ids = parse_unique_ints(data.get('category_ids', []))
+    citation_ids = parse_unique_ints(data.get('citation_ids', []))
     new_author_name = data.get('new_author_name', '').strip()
     new_author_affiliation = data.get('new_author_affiliation', '').strip()
     new_category_name = data.get('new_category_name', '').strip()
@@ -381,6 +382,16 @@ def upload_paper():
 
     if not title or not publication_year:
         return jsonify({'error': 'Title and publication year are required'}), 400
+    if new_author_affiliation and not new_author_name:
+        return jsonify({'error': 'Author name is required when adding an affiliation'}), 400
+    if new_author_name and not new_author_affiliation:
+        return jsonify({'error': 'Affiliation is required for new authors'}), 400
+    if not author_ids and not new_author_name:
+        return jsonify({'error': 'At least one author is required'}), 400
+    if new_category_description and not new_category_name:
+        return jsonify({'error': 'Category name is required when adding a description'}), 400
+    if not category_ids and not new_category_name:
+        return jsonify({'error': 'At least one category is required'}), 400
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -447,6 +458,21 @@ def upload_paper():
                 (paper_id, new_category_id, paper_id, new_category_id)
             )
 
+        # Link citations
+        if citation_ids:
+            placeholders = ','.join(['?' for _ in citation_ids])
+            cursor.execute(
+                f"SELECT paper_id FROM Papers WHERE paper_id IN ({placeholders})",
+                citation_ids
+            )
+            valid_ids = {row[0] for row in cursor.fetchall()}
+            for cited_id in citation_ids:
+                if cited_id in valid_ids and cited_id != paper_id:
+                    cursor.execute(
+                        "INSERT INTO Citations (citing_paper_id, cited_paper_id) VALUES (?, ?)",
+                        (paper_id, cited_id)
+                    )
+
         # Log upload activity
         cursor.execute(
             "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'UPLOAD')",
@@ -508,6 +534,7 @@ def delete_paper(paper_id):
     if claims.get('role_id') != 1:
         return jsonify({'error': 'Admin access required'}), 403
 
+    admin_user_id = get_jwt_identity()
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
@@ -518,6 +545,10 @@ def delete_paper(paper_id):
         cursor.execute("DELETE FROM Citations WHERE citing_paper_id=? OR cited_paper_id=?",
                        (paper_id, paper_id))
         cursor.execute("DELETE FROM Papers WHERE paper_id = ?", (paper_id,))
+        cursor.execute(
+            "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'DELETE_PAPER')",
+            (admin_user_id, None)
+        )
         conn.commit()
         return jsonify({'message': 'Paper deleted'})
     except Exception as e:
@@ -563,6 +594,10 @@ def add_review(paper_id):
             "INSERT INTO Reviews (user_id, paper_id, rating, comment) VALUES (?, ?, ?, ?)",
             (user_id, paper_id, rating, comment)
         )
+        cursor.execute(
+            "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'REVIEW')",
+            (user_id, paper_id)
+        )
         conn.commit()
         return jsonify({'message': 'Review submitted'})
     except Exception as e:
@@ -591,6 +626,33 @@ def list_categories():
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT category_id, category_name, description FROM Categories ORDER BY category_name")
+        return jsonify(rows_to_dicts(cursor.fetchall(), cursor))
+    finally:
+        conn.close()
+
+
+@papers_bp.route('/citations', methods=['GET'])
+@jwt_required()
+def list_citation_candidates():
+    claims = get_jwt()
+    role_id = claims.get('role_id')
+    user_id = get_jwt_identity()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        where_clause = ""
+        params = []
+        if role_id != 1:
+            where_clause = "WHERE COALESCE(pr.flagged, 0) = 0 OR p.uploaded_by = ?"
+            params.append(user_id)
+
+        cursor.execute(f"""
+            SELECT p.paper_id, p.title, p.publication_year
+            FROM Papers p
+            LEFT JOIN PlagiarismReports pr ON p.paper_id = pr.paper_id
+            {where_clause}
+            ORDER BY p.title
+        """, params)
         return jsonify(rows_to_dicts(cursor.fetchall(), cursor))
     finally:
         conn.close()
