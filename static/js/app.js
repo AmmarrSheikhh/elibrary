@@ -9,6 +9,8 @@ let searchTimeout = null;
 let selectedStars = 0;
 let userBookmarks = new Set();
 let adminUserSearchTimeout = null;
+let currentPaper = null;
+let currentPaperId = null;
 
 // ── UTILS ──────────────────────────────────────
 
@@ -202,6 +204,37 @@ function getActivityTitle(activity) {
     plagiarism_reject: 'Plagiarism rejected'
   };
   return labelMap[type] || 'Unknown Paper';
+}
+
+function sanitizeFileName(name) {
+  const base = (name || 'paper').toString().trim();
+  const safe = base.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
+  return safe || 'paper';
+}
+
+function buildPaperText(paper) {
+  const authors = Array.isArray(paper?.authors)
+    ? paper.authors.map(a => `${a.author_name}${a.affiliation ? ` (${a.affiliation})` : ''}`).join('; ')
+    : '';
+  const categories = Array.isArray(paper?.categories)
+    ? paper.categories.map(c => c.category_name).join(', ')
+    : '';
+
+  const lines = [
+    `Title: ${paper?.title || 'Untitled Paper'}`,
+    `Paper ID: ${paper?.paper_id || '—'}`,
+    `Year: ${paper?.publication_year || '—'}`,
+    `Uploaded By: ${paper?.uploader_name || '—'}`,
+    `Authors: ${authors || '—'}`,
+    `Categories: ${categories || '—'}`,
+    `Views: ${paper?.views ?? '—'}`,
+    `Downloads: ${paper?.downloads ?? '—'}`,
+    '',
+    'Abstract:',
+    paper?.abstract || '—'
+  ];
+
+  return lines.join('\n');
 }
 
 // ── AUTH ───────────────────────────────────────
@@ -583,6 +616,8 @@ async function viewPaper(paperId) {
     }
 
     const p = data;
+    currentPaper = p;
+    currentPaperId = paperId;
 
     const isBookmarked = userBookmarks.has(paperId);
     const plagClass = p.similarity_score >= 20 ? 'plag-high' : p.similarity_score >= 10 ? 'plag-medium' : 'plag-low';
@@ -685,7 +720,7 @@ async function viewPaper(paperId) {
             <button class="action-btn" onclick="logDownload(${paperId})">
               ⬇ Download Paper
             </button>
-            ${isAdmin ? `<button class="btn-danger" style="margin-top:0.5rem;width:100%" onclick="deletePaper(${paperId})">⊗ Delete Paper</button>` : ''}
+            ${isAdmin ? `<button class="btn-danger" style="margin-top:0.5rem;width:100%" onclick='confirmDeletePaper(${paperId}, ${JSON.stringify(p.title)})'>⊗ Delete Paper</button>` : ''}
           </div>
         </div>
 
@@ -780,8 +815,37 @@ async function toggleBookmark(paperId) {
 // ── DOWNLOAD ───────────────────────────────────
 
 async function logDownload(paperId) {
-  await apiFetch(`/papers/${paperId}/download`, { method: 'POST' });
-  showToast('Download logged — paper access recorded', 'success');
+  const res = await apiFetch(`/papers/${paperId}/download`, { method: 'POST' });
+  if (!res) return;
+
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to download paper'), 'error');
+    return;
+  }
+
+  const paper = currentPaperId === paperId ? currentPaper : null;
+  if (!paper) {
+    showToast('Download logged, but paper details are unavailable.', 'error');
+    return;
+  }
+
+  const fileName = `${sanitizeFileName(paper.title)}_${paper.publication_year || 'paper'}.txt`;
+  const content = buildPaperText(paper);
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+
+  showToast('Download started', 'success');
+  if (document.getElementById('page-dashboard')?.classList.contains('active')) {
+    loadDashboard();
+  }
 }
 
 // ── REVIEWS ────────────────────────────────────
@@ -1281,13 +1345,34 @@ async function submitResolveReport(reportId, action) {
   loadAdminStats();
 }
 
+function confirmDeletePaper(paperId, title) {
+  const displayTitle = title || 'this paper';
+  const html = `
+    <div class="confirm-modal">
+      <div class="confirm-title">Delete Paper</div>
+      <div class="confirm-body">Are you sure you want to permanently delete <strong>${displayTitle}</strong>? This action cannot be undone.</div>
+      <div class="confirm-actions">
+        <button class="btn-ghost" onclick="closeModalDirect()">Cancel</button>
+        <button class="btn-danger" onclick="deletePaper(${paperId})">Delete Paper</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+}
+
 async function deletePaper(paperId) {
-  if (!confirm('Permanently delete this paper and all associated data?')) return;
   const res = await apiFetch(`/papers/${paperId}`, { method: 'DELETE' });
-  if (res && res.ok) {
-    showToast('Paper deleted', 'success');
-    showPage('papers');
+  if (!res) return;
+
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to delete paper'), 'error');
+    return;
   }
+
+  closeModalDirect();
+  showToast('Paper deleted', 'success');
+  showPage('papers');
 }
 
 // ── MODAL ──────────────────────────────────────
