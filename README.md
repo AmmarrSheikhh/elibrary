@@ -1,6 +1,6 @@
 # Nexus E-Library Management System
 
-A full-stack research paper management platform built with **Flask** (Python) backend and a Single-Page Application frontend. Connects to **Microsoft SQL Server (MSSQL)** using your existing `ELIB2` database schema.
+A full-stack research paper management platform built with **Flask** (Python) backend and a Single-Page Application frontend. Connects to **Microsoft SQL Server (MSSQL)**
 
 ---
 
@@ -73,7 +73,7 @@ pip install -r requirements.txt
 ### 4. Configure database
 Edit `.env` with your SQL Server credentials:
 ```env
-DB_SERVER=localhost\SQLEXPRESS   # or your server name
+DB_SERVER= # your server name
 DB_NAME=ELIB2
 DB_USER=sa
 DB_PASSWORD=YourActualPassword
@@ -177,18 +177,6 @@ The engine runs automatically on every paper upload:
 - Every paper view logs a `VIEW` event in `UserActivity`
 - Every download logs a `DOWNLOAD` event
 - `Paper_Statistics.views` and `downloads` counters are updated atomically
-
----
-
-## Default Test Users (from seed data)
-
-| Email | Password (set your own) | Role |
-|-------|------------------------|------|
-| ammar@example.com | (set via registration) | Admin |
-| zainab@example.com | (set via registration) | Researcher |
-| mahrukh@example.com | (set via registration) | Student |
-
-Since the seed data uses bcrypt hashes directly, register fresh accounts via the UI to test all features.
 
 ---
 
