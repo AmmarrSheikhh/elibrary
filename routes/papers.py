@@ -36,6 +36,7 @@ def list_papers():
         category = request.args.get('category', '')
         year_from = request.args.get('year_from', '')
         year_to = request.args.get('year_to', '')
+        uploaded = (request.args.get('uploaded') or '').strip().lower()
         page = max(1, int(request.args.get('page', 1)))
         per_page = min(max(1, int(request.args.get('per_page', 10))), 50)
         offset = (page - 1) * per_page
@@ -91,6 +92,10 @@ def list_papers():
         if year_to:
             conditions.append("p.publication_year <= ?")
             params.append(int(year_to))
+
+        if uploaded in {'me', 'mine'}:
+            conditions.append("p.uploaded_by = ?")
+            params.append(user_id)
 
         # Flagged papers are only visible to uploader and admins until approved.
         if role_id != 1:

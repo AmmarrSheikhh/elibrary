@@ -11,6 +11,7 @@ let userBookmarks = new Set();
 let adminUserSearchTimeout = null;
 let currentPaper = null;
 let currentPaperId = null;
+let papersView = 'all';
 
 // ── UTILS ──────────────────────────────────────
 
@@ -805,6 +806,19 @@ function debounceSearch() {
   searchTimeout = setTimeout(searchPapers, 400);
 }
 
+function updatePapersTabs() {
+  const allTab = document.getElementById('papers-tab-all');
+  const mineTab = document.getElementById('papers-tab-mine');
+  if (allTab) allTab.classList.toggle('active', papersView === 'all');
+  if (mineTab) mineTab.classList.toggle('active', papersView === 'mine');
+}
+
+function setPapersView(view) {
+  papersView = view === 'mine' ? 'mine' : 'all';
+  updatePapersTabs();
+  searchPapers(1);
+}
+
 function toggleFilters() {
   const panel = document.getElementById('filter-panel');
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
@@ -831,6 +845,7 @@ async function searchPapers(page = 1) {
   if (category) params.append('category', category);
   if (yearFrom) params.append('year_from', yearFrom);
   if (yearTo) params.append('year_to', yearTo);
+  if (papersView === 'mine') params.append('uploaded', 'me');
 
   const listEl = document.getElementById('papers-list');
   const paginationEl = document.getElementById('pagination');
@@ -861,13 +876,17 @@ async function searchPapers(page = 1) {
 }
 
 async function loadPapers(page = 1) {
+  updatePapersTabs();
   searchPapers(page);
 }
 
 function renderPapers(papers, containerId, extraInfo = '') {
   const container = document.getElementById(containerId);
   if (!papers.length) {
-    container.innerHTML = `<div class="empty-state"><span class="empty-icon">◫</span><p>No papers found</p></div>`;
+    const emptyText = (containerId === 'papers-list' && papersView === 'mine')
+      ? 'No uploads yet'
+      : 'No papers found';
+    container.innerHTML = `<div class="empty-state"><span class="empty-icon">◫</span><p>${emptyText}</p></div>`;
     return;
   }
   container.innerHTML = papers.map(p => `
