@@ -5,7 +5,7 @@ from utils.db import get_db_connection, dict_from_row
 
 auth_bp = Blueprint('auth', __name__)
 
-VALID_ROLES = {1: 'Admin', 2: 'Researcher', 3: 'Student'}
+REGISTER_ROLES = {2: 'Researcher', 3: 'Student'}
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
@@ -19,8 +19,8 @@ def register():
     if not all([name, email, password, role_id]):
         return jsonify({'error': 'All fields are required'}), 400
 
-    if role_id not in VALID_ROLES:
-        return jsonify({'error': 'Invalid role. Use 1 (Admin), 2 (Researcher), or 3 (Student)'}), 400
+    if role_id not in REGISTER_ROLES:
+        return jsonify({'error': 'Invalid role. Use 2 (Researcher) or 3 (Student)'}), 400
 
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400

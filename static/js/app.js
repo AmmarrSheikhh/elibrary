@@ -116,6 +116,110 @@ function resetInputs(container) {
 function resetAuthForm(formId) {
   const form = document.getElementById(formId);
   if (form) resetInputs(form);
+  if (formId === 'register-form') resetInstitutionEntry();
+  resetPasswordToggles();
+}
+
+function resetPasswordToggle(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.type = 'password';
+  const btn = input.parentElement?.querySelector('.input-action');
+  if (btn) btn.textContent = 'Show';
+}
+
+function resetPasswordToggles() {
+  [
+    'login-password',
+    'reg-password',
+    'reg-confirm-password',
+    'profile-current-password',
+    'profile-new-password',
+    'profile-confirm-password'
+  ].forEach(resetPasswordToggle);
+}
+
+function resetInstitutionEntry() {
+  const entry = document.getElementById('institution-entry');
+  const toggle = document.getElementById('institution-toggle');
+  const select = document.getElementById('reg-institution');
+  const nameInput = document.getElementById('reg-institution-name');
+  const locationInput = document.getElementById('reg-institution-location');
+
+  if (entry) entry.style.display = 'none';
+  if (select) select.disabled = false;
+  if (toggle) toggle.textContent = '+ Add your institution';
+  if (nameInput) nameInput.value = '';
+  if (locationInput) locationInput.value = '';
+}
+
+function toggleInstitutionEntry() {
+  const entry = document.getElementById('institution-entry');
+  const toggle = document.getElementById('institution-toggle');
+  const select = document.getElementById('reg-institution');
+  if (!entry || !toggle || !select) return;
+
+  const shouldShow = entry.style.display === 'none' || entry.style.display === '';
+  entry.style.display = shouldShow ? 'block' : 'none';
+  select.disabled = shouldShow;
+  toggle.textContent = shouldShow ? 'Use existing institution' : '+ Add your institution';
+
+  if (!shouldShow) {
+    const nameInput = document.getElementById('reg-institution-name');
+    const locationInput = document.getElementById('reg-institution-location');
+    if (nameInput) nameInput.value = '';
+    if (locationInput) locationInput.value = '';
+  }
+}
+
+function resetProfileInstitutionEntry() {
+  const entry = document.getElementById('profile-institution-entry');
+  const toggle = document.getElementById('profile-institution-toggle');
+  const select = document.getElementById('profile-institution');
+  const nameInput = document.getElementById('profile-institution-name');
+  const locationInput = document.getElementById('profile-institution-location');
+
+  if (entry) entry.style.display = 'none';
+  if (select) select.disabled = false;
+  if (toggle) toggle.textContent = '+ Add your institution';
+  if (nameInput) nameInput.value = '';
+  if (locationInput) locationInput.value = '';
+}
+
+function toggleProfileInstitutionEntry() {
+  const entry = document.getElementById('profile-institution-entry');
+  const toggle = document.getElementById('profile-institution-toggle');
+  const select = document.getElementById('profile-institution');
+  if (!entry || !toggle || !select) return;
+
+  const shouldShow = entry.style.display === 'none' || entry.style.display === '';
+  entry.style.display = shouldShow ? 'block' : 'none';
+  select.disabled = shouldShow;
+  toggle.textContent = shouldShow ? 'Use existing institution' : '+ Add your institution';
+
+  if (!shouldShow) {
+    const nameInput = document.getElementById('profile-institution-name');
+    const locationInput = document.getElementById('profile-institution-location');
+    if (nameInput) nameInput.value = '';
+    if (locationInput) locationInput.value = '';
+  }
+}
+
+function resetProfilePasswordFields() {
+  const ids = ['profile-current-password', 'profile-new-password', 'profile-confirm-password'];
+  ids.forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.value = '';
+  });
+  ids.forEach(resetPasswordToggle);
+}
+
+function togglePassword(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const isHidden = input.type === 'password';
+  input.type = isHidden ? 'text' : 'password';
+  if (btn) btn.textContent = isHidden ? 'Hide' : 'Show';
 }
 
 function resetReviewForm() {
@@ -143,6 +247,13 @@ function resetPageFields(pageId) {
   if (pageId === 'page-paper-detail') {
     resetReviewForm();
   }
+
+  if (pageId === 'page-profile') {
+    resetProfileInstitutionEntry();
+    resetProfilePasswordFields();
+    const err = document.getElementById('profile-error');
+    if (err) err.style.display = 'none';
+  }
 }
 
 function setupAuthEnterSubmit() {
@@ -157,7 +268,7 @@ function setupAuthEnterSubmit() {
     });
   });
 
-  ['reg-name', 'reg-email', 'reg-password'].forEach(id => {
+  ['reg-name', 'reg-email', 'reg-password', 'reg-confirm-password', 'reg-institution-name', 'reg-institution-location'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener('keydown', (event) => {
@@ -200,6 +311,7 @@ function getActivityTitle(activity) {
     unbookmark: 'Bookmark removed',
     delete_paper: 'Deleted paper',
     delete_user: 'Deleted user',
+    promote_user: 'User promoted',
     plagiarism_approve: 'Plagiarism approved',
     plagiarism_reject: 'Plagiarism rejected'
   };
@@ -282,14 +394,70 @@ async function login() {
   }
 }
 
+async function createInstitution(name, location, errorTargetId) {
+  const res = await fetch(API + '/users/institutions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, location })
+  });
+
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    if (errorTargetId) {
+      showError(errorTargetId, getApiErrorMessage(data, 'Failed to add institution'));
+    } else {
+      showToast(getApiErrorMessage(data, 'Failed to add institution'), 'error');
+    }
+    return null;
+  }
+
+  return data;
+}
+
 async function register() {
   const name = document.getElementById('reg-name').value.trim();
   const email = document.getElementById('reg-email').value.trim();
   const password = document.getElementById('reg-password').value;
+  const confirmPassword = document.getElementById('reg-confirm-password').value;
   const role_id = parseInt(document.getElementById('reg-role').value);
-  const institution_id = parseInt(document.getElementById('reg-institution').value) || null;
+  const institutionSelect = document.getElementById('reg-institution');
+  let institution_id = parseInt(institutionSelect?.value) || null;
+  const newInstitutionName = document.getElementById('reg-institution-name')?.value.trim();
+  const newInstitutionLocation = document.getElementById('reg-institution-location')?.value.trim();
 
-  if (!name || !email || !password) return showError('auth-error', 'Please fill in all fields');
+  if (!name || !email || !password || !confirmPassword) {
+    return showError('auth-error', 'Please fill in all fields');
+  }
+
+  if (password.length < 6) {
+    return showError('auth-error', 'Password must be at least 6 characters');
+  }
+
+  if (password !== confirmPassword) {
+    return showError('auth-error', 'Passwords do not match');
+  }
+
+  if (newInstitutionLocation && !newInstitutionName) {
+    return showError('auth-error', 'Please enter the institution name');
+  }
+
+  if (newInstitutionName) {
+    const created = await createInstitution(newInstitutionName, newInstitutionLocation || null, 'auth-error');
+    if (!created) return;
+    institution_id = created.institution_id;
+    if (institutionSelect && institution_id) {
+      const exists = Array.from(institutionSelect.options)
+        .some(opt => opt.value === String(institution_id));
+      if (!exists) {
+        const opt = document.createElement('option');
+        const locationLabel = created.location ? ` — ${created.location}` : '';
+        opt.value = created.institution_id;
+        opt.textContent = `${created.name}${locationLabel}`;
+        institutionSelect.appendChild(opt);
+      }
+      institutionSelect.value = String(institution_id);
+    }
+  }
 
   try {
     const res = await fetch(API + '/auth/register', {
@@ -324,27 +492,37 @@ function logout() {
   document.getElementById('main-app').style.display = 'none';
 }
 
+async function loadInstitutionOptions(selectId, selectedId = null) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Select Institution</option>';
+
+  try {
+    const res = await fetch(API + '/users/institutions');
+    if (!res.ok) return;
+    const institutions = await res.json();
+    institutions.forEach(i => {
+      const opt = document.createElement('option');
+      opt.value = i.institution_id;
+      const locationLabel = i.location ? ` — ${i.location}` : '';
+      opt.textContent = `${i.name}${locationLabel}`;
+      sel.appendChild(opt);
+    });
+
+    if (selectedId !== null && selectedId !== undefined) {
+      sel.value = String(selectedId);
+    }
+  } catch {
+    // Non-blocking: forms still work without institutions.
+  }
+}
+
 // ── APP INIT ───────────────────────────────────
 
 async function bootstrap() {
   setupAuthEnterSubmit();
 
-  // Load institutions for register form.
-  try {
-    const res = await fetch(API + '/users/institutions');
-    if (res.ok) {
-      const institutions = await res.json();
-      const sel = document.getElementById('reg-institution');
-      institutions.forEach(i => {
-        const opt = document.createElement('option');
-        opt.value = i.institution_id;
-        opt.textContent = `${i.name} — ${i.location}`;
-        sel.appendChild(opt);
-      });
-    }
-  } catch {
-    // Non-blocking on boot: auth should still work without institutions.
-  }
+  await loadInstitutionOptions('reg-institution');
 
   const token = getToken();
   if (!token) return;
@@ -375,6 +553,7 @@ function initApp() {
     el.style.display = currentUser.role_id === 1 ? 'flex' : 'none';
   });
 
+  updateDashboardVisibility();
   showPage('dashboard');
   loadBookmarkIds();
 }
@@ -398,6 +577,7 @@ function showPage(name) {
 
   // Load page data
   if (name === 'dashboard') loadDashboard();
+  else if (name === 'profile') loadProfile();
   else if (name === 'papers') loadPapers();
   else if (name === 'bookmarks') loadBookmarks();
   else if (name === 'recommendations') loadRecommendations();
@@ -412,7 +592,20 @@ function showAdminTab(tab) {
 
 // ── DASHBOARD ──────────────────────────────────
 
+function updateDashboardVisibility() {
+  const viewsCard = document.getElementById('stat-card-views');
+  const downloadsCard = document.getElementById('stat-card-downloads');
+  const showEngagement = currentUser.role_id !== 3;
+  if (viewsCard) viewsCard.style.display = showEngagement ? '' : 'none';
+  if (downloadsCard) downloadsCard.style.display = showEngagement ? '' : 'none';
+  if (!showEngagement) {
+    document.getElementById('stat-views').textContent = '—';
+    document.getElementById('stat-downloads').textContent = '—';
+  }
+}
+
 async function loadDashboard() {
+  updateDashboardVisibility();
   // Load activity
   const actRes = await apiFetch('/users/activity');
   if (actRes && actRes.ok) {
@@ -455,6 +648,15 @@ async function loadDashboard() {
       const d = await res.json();
       document.getElementById('stat-papers').textContent = d.total?.toLocaleString() || '—';
     }
+
+    if (currentUser.role_id === 2) {
+      const statsRes = await apiFetch('/users/stats');
+      if (statsRes && statsRes.ok) {
+        const stats = await statsRes.json();
+        document.getElementById('stat-views').textContent = stats.total_views?.toLocaleString() || '—';
+        document.getElementById('stat-downloads').textContent = stats.total_downloads?.toLocaleString() || '—';
+      }
+    }
   }
 
   loadTopPapersWidget();
@@ -482,6 +684,118 @@ async function loadTopPapersWidget() {
       <span class="top-paper-views">👁 ${(p.views || 0).toLocaleString()}</span>
     </div>
   `).join('') || '<div class="text-muted">No data</div>';
+}
+
+// ── PROFILE ───────────────────────────────────
+
+async function loadProfile() {
+  resetProfilePasswordFields();
+  resetProfileInstitutionEntry();
+  const err = document.getElementById('profile-error');
+  if (err) err.style.display = 'none';
+
+  const res = await apiFetch('/users/profile');
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok || !data) {
+    showError('profile-error', getApiErrorMessage(data, 'Failed to load profile'));
+    return;
+  }
+
+  document.getElementById('profile-name').value = data.name || '';
+  document.getElementById('profile-email').value = data.email || '';
+  await loadInstitutionOptions('profile-institution', data.institution_id);
+}
+
+async function updateProfile(payload, successMessage) {
+  const res = await apiFetch('/users/profile', {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+  if (!res) return null;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showError('profile-error', getApiErrorMessage(data, 'Failed to update profile'));
+    return null;
+  }
+
+  const updated = data?.user || data;
+  if (updated?.name) {
+    currentUser.name = updated.name;
+    document.getElementById('sidebar-name').textContent = updated.name;
+    document.getElementById('dash-name').textContent = updated.name.split(' ')[0];
+    document.getElementById('user-avatar').textContent = updated.name.charAt(0).toUpperCase();
+  }
+  if (updated?.email) currentUser.email = updated.email;
+
+  const err = document.getElementById('profile-error');
+  if (err) err.style.display = 'none';
+
+  showToast(successMessage || 'Profile updated', 'success');
+  return updated;
+}
+
+async function saveProfileDetails() {
+  const name = document.getElementById('profile-name').value.trim();
+  const email = document.getElementById('profile-email').value.trim();
+  const institutionSelect = document.getElementById('profile-institution');
+  let institution_id = parseInt(institutionSelect?.value, 10) || null;
+  const newInstitutionName = document.getElementById('profile-institution-name')?.value.trim();
+  const newInstitutionLocation = document.getElementById('profile-institution-location')?.value.trim();
+
+  if (!name || !email) {
+    return showError('profile-error', 'Name and email are required');
+  }
+
+  if (newInstitutionLocation && !newInstitutionName) {
+    return showError('profile-error', 'Please enter the institution name');
+  }
+
+  if (newInstitutionName) {
+    const created = await createInstitution(newInstitutionName, newInstitutionLocation || null, 'profile-error');
+    if (!created) return;
+    institution_id = created.institution_id;
+    if (institutionSelect && institution_id) {
+      const exists = Array.from(institutionSelect.options)
+        .some(opt => opt.value === String(institution_id));
+      if (!exists) {
+        const opt = document.createElement('option');
+        const locationLabel = created.location ? ` — ${created.location}` : '';
+        opt.value = created.institution_id;
+        opt.textContent = `${created.name}${locationLabel}`;
+        institutionSelect.appendChild(opt);
+      }
+      institutionSelect.value = String(institution_id);
+    }
+    resetProfileInstitutionEntry();
+  }
+
+  await updateProfile({ name, email, institution_id }, 'Profile updated');
+}
+
+async function saveProfilePassword() {
+  const currentPassword = document.getElementById('profile-current-password').value;
+  const newPassword = document.getElementById('profile-new-password').value;
+  const confirmPassword = document.getElementById('profile-confirm-password').value;
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    return showError('profile-error', 'Please fill in all password fields');
+  }
+
+  if (newPassword.length < 6) {
+    return showError('profile-error', 'New password must be at least 6 characters');
+  }
+
+  if (newPassword !== confirmPassword) {
+    return showError('profile-error', 'Passwords do not match');
+  }
+
+  const updated = await updateProfile({
+    current_password: currentPassword,
+    new_password: newPassword
+  }, 'Password updated');
+
+  if (updated) resetProfilePasswordFields();
 }
 
 // ── PAPERS ─────────────────────────────────────
@@ -660,7 +974,10 @@ async function viewPaper(paperId) {
             <div class="review-item">
               <div class="review-header">
                 <span class="reviewer-name">${r.reviewer_name}</span>
-                <span class="stars">${stars(r.rating)}</span>
+                <div class="review-meta">
+                  <span class="stars">${stars(r.rating)}</span>
+                  ${isAdmin ? `<button class="btn-ghost btn-sm review-delete" onclick="confirmDeleteReview(${r.review_id}, ${paperId})">Delete</button>` : ''}
+                </div>
               </div>
               ${r.comment ? `<div class="review-comment">${r.comment}</div>` : ''}
             </div>
@@ -872,6 +1189,32 @@ async function submitReview(paperId) {
     const d = await res.json();
     showToast(d.error || 'Failed to submit review', 'error');
   }
+}
+
+function confirmDeleteReview(reviewId, paperId) {
+  const html = `
+    <div class="confirm-modal">
+      <div class="confirm-title">Delete Review</div>
+      <div class="confirm-body">Are you sure you want to delete this review? This action cannot be undone.</div>
+      <div class="confirm-actions">
+        <button class="btn-ghost" onclick="closeModalDirect()">Cancel</button>
+        <button class="btn-danger" onclick="deleteReview(${reviewId}, ${paperId})">Delete Review</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+}
+
+async function deleteReview(reviewId, paperId) {
+  const res = await apiFetch(`/admin/reviews/${reviewId}`, { method: 'DELETE' });
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    return showToast(getApiErrorMessage(data, 'Failed to delete review'), 'error');
+  }
+  closeModalDirect();
+  showToast('Review deleted', 'success');
+  viewPaper(paperId);
 }
 
 // ── RECOMMENDATIONS ────────────────────────────
@@ -1137,16 +1480,37 @@ async function loadAdminUsers() {
         </tr>
       </thead>
       <tbody>
-        ${users.map(u => `
+        ${users.map(u => {
+          const actions = [];
+          const isSelf = u.user_id === currentUser.user_id;
+
+          if (!isSelf) {
+            if (u.role_id === 3) {
+              actions.push(`<button class="btn-secondary btn-sm" onclick='confirmPromoteUser(${u.user_id}, ${JSON.stringify(u.name)}, 2)'>Make Researcher</button>`);
+              actions.push(`<button class="btn-secondary btn-sm" onclick='confirmPromoteUser(${u.user_id}, ${JSON.stringify(u.name)}, 1)'>Make Admin</button>`);
+            } else if (u.role_id === 2) {
+              actions.push(`<button class="btn-secondary btn-sm" onclick='confirmPromoteUser(${u.user_id}, ${JSON.stringify(u.name)}, 1)'>Make Admin</button>`);
+            } else {
+              actions.push('<span class="text-muted">Admin</span>');
+            }
+
+            actions.push(`<button class="btn-danger btn-sm" onclick='confirmDeleteUser(${u.user_id}, ${JSON.stringify(u.name)}, ${JSON.stringify(u.email)})'>Delete</button>`);
+          } else {
+            actions.push('<span class="text-muted">You</span>');
+          }
+
+          const actionHtml = actions.length ? `<div class="table-actions">${actions.join('')}</div>` : '—';
+          return `
           <tr>
             <td><span style="font-family:var(--font-mono);color:var(--text-muted)">#${u.user_id}</span></td>
             <td>${u.name}</td>
             <td style="font-family:var(--font-mono);font-size:0.8rem">${u.email}</td>
             <td><span class="role-badge role-${u.role_id}">${u.role_name}</span></td>
             <td>${u.institution_name || '—'}</td>
-            <td>${u.user_id !== currentUser.user_id ? `<button class="btn-danger btn-sm" onclick='confirmDeleteUser(${u.user_id}, ${JSON.stringify(u.name)}, ${JSON.stringify(u.email)})'>Delete</button>` : '<span class="text-muted">You</span>'}</td>
+            <td>${actionHtml}</td>
           </tr>
-        `).join('')}
+        `;
+        }).join('')}
       </tbody>
     </table>
   `;
@@ -1190,6 +1554,40 @@ async function deleteUser(userId) {
 
   closeModalDirect();
   showToast('User deleted', 'success');
+  loadAdminUsers();
+}
+
+function getRoleLabel(roleId) {
+  return roleId === 1 ? 'Admin' : 'Researcher';
+}
+
+function confirmPromoteUser(userId, name, roleId) {
+  const displayName = name || 'this user';
+  const roleLabel = getRoleLabel(roleId);
+  const html = `
+    <div class="confirm-modal">
+      <div class="confirm-title">Promote to ${roleLabel}</div>
+      <div class="confirm-body">Promote <strong>${displayName}</strong> to ${roleLabel.toLowerCase()}?</div>
+      <div class="confirm-actions">
+        <button class="btn-ghost" onclick="closeModalDirect()">Cancel</button>
+        <button class="btn-secondary" onclick="promoteUser(${userId}, ${roleId})">Promote</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+}
+
+async function promoteUser(userId, roleId) {
+  const res = await apiFetch(`/admin/users/${userId}/promote`, {
+    method: 'POST',
+    body: JSON.stringify({ role_id: roleId })
+  });
+  if (!res) return;
+  const d = await readApiResponse(res);
+  if (!res.ok) return showToast(getApiErrorMessage(d, 'Failed to promote user'), 'error');
+
+  closeModalDirect();
+  showToast(`User promoted to ${getRoleLabel(roleId).toLowerCase()}`, 'success');
   loadAdminUsers();
 }
 

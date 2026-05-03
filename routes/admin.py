@@ -162,6 +162,80 @@ def delete_user(user_id):
         conn.close()
 
 
+@admin_bp.route('/users/<int:user_id>/promote', methods=['POST'])
+@jwt_required()
+@require_admin()
+def promote_user(user_id):
+    admin_user_id = get_jwt_identity()
+    data = request.get_json(silent=True) or {}
+    target_role = data.get('role_id', 1)
+    try:
+        target_role = int(target_role)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid role selection'}), 400
+
+    if target_role not in (1, 2):
+        return jsonify({'error': 'Role must be 1 (Admin) or 2 (Researcher)'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT role_id FROM Users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': 'User not found'}), 404
+
+        current_role = row[0]
+        if current_role == 1 and target_role != 1:
+            return jsonify({'error': 'Admins cannot be demoted'}), 400
+
+        if current_role == target_role:
+            role_label = 'admin' if target_role == 1 else 'researcher'
+            return jsonify({'message': f'User is already a {role_label}'})
+
+        cursor.execute("UPDATE Users SET role_id = ? WHERE user_id = ?", (target_role, user_id))
+        cursor.execute(
+            "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'PROMOTE_USER')",
+            (admin_user_id, None)
+        )
+        conn.commit()
+        role_label = 'admin' if target_role == 1 else 'researcher'
+        return jsonify({'message': f'User promoted to {role_label}'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/reviews/<int:review_id>', methods=['DELETE'])
+@jwt_required()
+@require_admin()
+def delete_review(review_id):
+    admin_user_id = get_jwt_identity()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT paper_id FROM Reviews WHERE review_id = ?", (review_id,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': 'Review not found'}), 404
+
+        paper_id = row[0]
+        cursor.execute("DELETE FROM Reviews WHERE review_id = ?", (review_id,))
+        cursor.execute(
+            "INSERT INTO UserActivity (user_id, paper_id, activity_type) VALUES (?, ?, 'DELETE_REVIEW')",
+            (admin_user_id, paper_id)
+        )
+        conn.commit()
+        return jsonify({'message': 'Review deleted'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
 @admin_bp.route('/plagiarism', methods=['GET'])
 @jwt_required()
 @require_admin()

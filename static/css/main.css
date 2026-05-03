@@ -3,22 +3,22 @@
    ================================================ */
 
 :root {
-  --bg-deep: #3d4127;
-  --bg-surface: #313521;
-  --bg-card: #2a2d1a;
-  --bg-hover: #353a24;
-  --bg-active: #3b4028;
+  --bg-deep: #d4d4d4;
+  --bg-surface: #b3b3b3;
+  --bg-card: #ffffff;
+  --bg-hover: #d4d4d4;
+  --bg-active: #b3b3b3;
 
-  --border: rgba(212,222,149,0.18);
-  --border-accent: rgba(212,222,149,0.35);
+  --border: rgba(43,43,43,0.18);
+  --border-accent: rgba(43,43,43,0.45);
 
-  --text-primary: #f4f6e6;
-  --text-secondary: #dfe6b1;
-  --text-muted: #bac095;
+  --text-primary: #2b2b2b;
+  --text-secondary: #3b3b3b;
+  --text-muted: #5a5a5a;
 
-  --accent: #d4de95;
-  --accent-glow: rgba(212,222,149,0.25);
-  --accent-deep: #bac095;
+  --accent: #2b2b2b;
+  --accent-glow: rgba(43,43,43,0.2);
+  --accent-deep: #2b2b2b;
   --gold: #e8c87a;
   --gold-dim: rgba(232,200,122,0.15);
   --danger: #ff6b6b;
@@ -63,16 +63,16 @@ body {
 .auth-bg {
   position: fixed;
   inset: 0;
-  background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(83,113,196,0.3) 0%, transparent 70%),
-              radial-gradient(ellipse 40% 40% at 80% 80%, rgba(139,174,255,0.08) 0%, transparent 60%);
+  background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(255,255,255,0.85) 0%, transparent 70%),
+              radial-gradient(ellipse 45% 40% at 80% 80%, rgba(43,43,43,0.08) 0%, transparent 65%);
 }
 
 .auth-grid {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(139,174,255,0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(139,174,255,0.04) 1px, transparent 1px);
+    linear-gradient(rgba(43,43,43,0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(43,43,43,0.08) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
@@ -101,7 +101,7 @@ body {
 
 @keyframes pulse-glow {
   0%, 100% { filter: drop-shadow(0 0 20px var(--accent)); }
-  50% { filter: drop-shadow(0 0 35px var(--accent)) drop-shadow(0 0 60px rgba(139,174,255,0.3)); }
+  50% { filter: drop-shadow(0 0 35px var(--accent)) drop-shadow(0 0 60px rgba(43,43,43,0.2)); }
 }
 
 .brand-title {
@@ -127,7 +127,7 @@ body {
   padding: 2rem;
   width: 100%;
   backdrop-filter: blur(20px);
-  box-shadow: 0 24px 64px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+  box-shadow: 0 24px 64px rgba(43,43,43,0.2), inset 0 1px 0 rgba(255,255,255,0.4);
 }
 
 .auth-tabs {
@@ -209,6 +209,47 @@ textarea { resize: vertical; min-height: 100px; }
   color: var(--bg-deep);
 }
 
+.input-with-action {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.input-with-action input { flex: 1; }
+
+.input-action {
+  background: var(--bg-active);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.input-action:hover {
+  color: var(--text-primary);
+  border-color: var(--border-accent);
+}
+
+.inline-action {
+  margin-top: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+}
+
+.institution-entry {
+  padding: 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: rgba(80,80,129,0.15);
+  margin-bottom: 1.1rem;
+}
+
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 
 .form-row-inline {
@@ -251,7 +292,7 @@ textarea { resize: vertical; min-height: 100px; }
 
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(212,222,149,0.2);
+  box-shadow: 0 6px 20px rgba(43,43,43,0.18);
   background: linear-gradient(135deg, var(--bg-hover) 0%, var(--bg-active) 100%);
 }
 
@@ -509,7 +550,7 @@ textarea { resize: vertical; min-height: 100px; }
 .stat-card.stat-link:hover {
   border-color: var(--border-accent);
   transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(212,222,149,0.2);
+  box-shadow: 0 10px 24px rgba(43,43,43,0.18);
 }
 
 .stat-card.stat-link:focus-visible {
@@ -548,6 +589,36 @@ textarea { resize: vertical; min-height: 100px; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.4rem;
+}
+
+/* ── PROFILE ─────────────────────────────────── */
+.profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 1.5rem;
+}
+
+.profile-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.6rem;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.profile-note {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 900px) {
+  .profile-grid { grid-template-columns: 1fr; }
 }
 
 .section-title {
@@ -991,6 +1062,17 @@ textarea { resize: vertical; min-height: 100px; }
   margin-bottom: 0.35rem;
 }
 
+.review-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.review-delete {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+}
+
 .reviewer-name { font-size: 0.82rem; font-weight: 500; }
 
 .stars { color: var(--gold); font-size: 0.85rem; }
@@ -1093,6 +1175,12 @@ textarea { resize: vertical; min-height: 100px; }
 
 .data-table tbody tr:nth-child(even) td { background: var(--bg-surface); }
 .data-table tr:hover td { background: var(--bg-active); }
+
+.table-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
 
 .role-badge {
   font-size: 0.68rem;
