@@ -130,6 +130,9 @@
       <a class="nav-item admin-only" onclick="showPage('admin')" data-page="admin">
         <span class="nav-icon">◈</span> Admin Panel
       </a>
+      <a class="nav-item admin-only" onclick="showPage('manage')" data-page="manage">
+        <span class="nav-icon">▣</span> Manage System
+      </a>
     </nav>
     <div class="sidebar-user">
       <div class="user-avatar" id="user-avatar">U</div>
@@ -408,6 +411,85 @@
           <label><input type="checkbox" id="flagged-only" onchange="loadPlagiarismReports()"> Show flagged only</label>
         </div>
         <div id="plagiarism-table"></div>
+      </div>
+    </div>
+
+    <!-- Manage System -->
+    <div id="page-manage" class="page admin-only">
+      <div class="page-header">
+        <div>
+          <h2 class="page-title">Manage System</h2>
+          <p class="page-sub">Admin-only tools for system data maintenance</p>
+        </div>
+      </div>
+      <div class="manage-stack">
+        <div class="profile-card">
+          <h3 class="section-title">Add Entries</h3>
+          <div class="manage-grid">
+            <div class="form-group">
+              <label>Author Name</label>
+              <input type="text" id="manage-author-name" placeholder="Author name">
+            </div>
+            <div class="form-group">
+              <label>Author Affiliation</label>
+              <input type="text" id="manage-author-affiliation" placeholder="Affiliation">
+            </div>
+            <div class="form-group">
+              <button class="btn-primary" onclick="createManageAuthor()">Add Author</button>
+            </div>
+          </div>
+          <div class="manage-grid">
+            <div class="form-group">
+              <label>Category Name</label>
+              <input type="text" id="manage-category-name" placeholder="Category name">
+            </div>
+            <div class="form-group">
+              <label>Category Description</label>
+              <input type="text" id="manage-category-desc" placeholder="Description (optional)">
+            </div>
+            <div class="form-group">
+              <button class="btn-primary" onclick="createManageCategory()">Add Category</button>
+            </div>
+          </div>
+          <div class="manage-grid">
+            <div class="form-group">
+              <label>Institution Name</label>
+              <input type="text" id="manage-institution-name" placeholder="Institution name">
+            </div>
+            <div class="form-group">
+              <label>Institution Location</label>
+              <input type="text" id="manage-institution-location" placeholder="Location (optional)">
+            </div>
+            <div class="form-group">
+              <button class="btn-primary" onclick="createManageInstitution()">Add Institution</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="profile-card">
+          <h3 class="section-title">Authors</h3>
+          <div id="manage-authors-table"></div>
+        </div>
+
+        <div class="profile-card">
+          <h3 class="section-title">Categories</h3>
+          <div id="manage-categories-table"></div>
+        </div>
+
+        <div class="profile-card">
+          <h3 class="section-title">Institutions</h3>
+          <div id="manage-institutions-table"></div>
+        </div>
+
+        <div class="profile-card">
+          <h3 class="section-title">Users</h3>
+          <div id="manage-users-table"></div>
+        </div>
+
+        <div class="profile-card">
+          <h3 class="section-title">Papers</h3>
+          <div id="manage-papers-table"></div>
+        </div>
       </div>
     </div>
 

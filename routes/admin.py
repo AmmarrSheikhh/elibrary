@@ -135,9 +135,17 @@ def delete_user(user_id):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT user_id FROM Users WHERE user_id = ?", (user_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT user_id, role_id FROM Users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        if not row:
             return jsonify({'error': 'User not found'}), 404
+
+        target_role_id = row[1]
+        if target_role_id == 1:
+            cursor.execute("SELECT COUNT(*) FROM Users WHERE role_id = 1")
+            admin_count = cursor.fetchone()[0]
+            if admin_count <= 1:
+                return jsonify({'error': 'At least one admin account must remain'}), 400
 
         # Remove all papers uploaded by this user first so researchers/admins are deletable.
         cursor.execute("SELECT paper_id FROM Papers WHERE uploaded_by = ?", (user_id,))
@@ -392,5 +400,255 @@ def get_stats():
         stats['users_by_role'] = rows_to_dicts(cursor.fetchall(), cursor)
 
         return jsonify(stats)
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/papers', methods=['GET'])
+@jwt_required()
+@require_admin()
+def list_papers_admin():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT p.paper_id, p.title, p.publication_year, p.upload_date,
+                   p.uploaded_by, u.name AS uploader_name
+            FROM Papers p
+            LEFT JOIN Users u ON p.uploaded_by = u.user_id
+            ORDER BY p.upload_date DESC, p.paper_id DESC
+            """
+        )
+        return jsonify(rows_to_dicts(cursor.fetchall(), cursor))
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/authors', methods=['GET'])
+@jwt_required()
+@require_admin()
+def list_authors_admin():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT author_id, author_name, affiliation FROM Authors ORDER BY author_name")
+        return jsonify(rows_to_dicts(cursor.fetchall(), cursor))
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/authors', methods=['POST'])
+@jwt_required()
+@require_admin()
+def create_author_admin():
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    affiliation = (data.get('affiliation') or '').strip()
+
+    if not name or not affiliation:
+        return jsonify({'error': 'Author name and affiliation are required'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT author_id, author_name, affiliation
+            FROM Authors
+            WHERE LOWER(author_name) = LOWER(?) AND LOWER(COALESCE(affiliation, '')) = LOWER(?)
+            """,
+            (name, affiliation)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            return jsonify(dict_from_row(existing, cursor))
+
+        cursor.execute(
+            """
+            INSERT INTO Authors (author_name, affiliation)
+            OUTPUT INSERTED.author_id, INSERTED.author_name, INSERTED.affiliation
+            VALUES (?, ?)
+            """,
+            (name, affiliation)
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        return jsonify(dict_from_row(row, cursor)), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/authors/<int:author_id>', methods=['DELETE'])
+@jwt_required()
+@require_admin()
+def delete_author_admin(author_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT author_id FROM Authors WHERE author_id = ?", (author_id,))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Author not found'}), 404
+
+        cursor.execute("DELETE FROM Paper_Authors WHERE author_id = ?", (author_id,))
+        cursor.execute("DELETE FROM Authors WHERE author_id = ?", (author_id,))
+        conn.commit()
+        return jsonify({'message': 'Author deleted'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/categories', methods=['GET'])
+@jwt_required()
+@require_admin()
+def list_categories_admin():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT category_id, category_name, description FROM Categories ORDER BY category_name")
+        return jsonify(rows_to_dicts(cursor.fetchall(), cursor))
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/categories', methods=['POST'])
+@jwt_required()
+@require_admin()
+def create_category_admin():
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    description = (data.get('description') or '').strip()
+
+    if not name:
+        return jsonify({'error': 'Category name is required'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT category_id, category_name, description FROM Categories WHERE LOWER(category_name) = LOWER(?)",
+            (name,)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            return jsonify(dict_from_row(existing, cursor))
+
+        cursor.execute(
+            """
+            INSERT INTO Categories (category_name, description)
+            OUTPUT INSERTED.category_id, INSERTED.category_name, INSERTED.description
+            VALUES (?, ?)
+            """,
+            (name, description or None)
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        return jsonify(dict_from_row(row, cursor)), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/categories/<int:category_id>', methods=['DELETE'])
+@jwt_required()
+@require_admin()
+def delete_category_admin(category_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT category_id FROM Categories WHERE category_id = ?", (category_id,))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Category not found'}), 404
+
+        cursor.execute("DELETE FROM Paper_Categories WHERE category_id = ?", (category_id,))
+        cursor.execute("DELETE FROM Categories WHERE category_id = ?", (category_id,))
+        conn.commit()
+        return jsonify({'message': 'Category deleted'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/institutions', methods=['GET'])
+@jwt_required()
+@require_admin()
+def list_institutions_admin():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT institution_id, name, location FROM Institutions ORDER BY name")
+        return jsonify(rows_to_dicts(cursor.fetchall(), cursor))
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/institutions', methods=['POST'])
+@jwt_required()
+@require_admin()
+def create_institution_admin():
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    location = (data.get('location') or '').strip()
+
+    if not name:
+        return jsonify({'error': 'Institution name is required'}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT institution_id, name, location FROM Institutions WHERE LOWER(name) = LOWER(?)",
+            (name,)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            return jsonify(dict_from_row(existing, cursor))
+
+        cursor.execute(
+            """
+            INSERT INTO Institutions (name, location)
+            OUTPUT INSERTED.institution_id, INSERTED.name, INSERTED.location
+            VALUES (?, ?)
+            """,
+            (name, location or None)
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        return jsonify(dict_from_row(row, cursor)), 201
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@admin_bp.route('/institutions/<int:institution_id>', methods=['DELETE'])
+@jwt_required()
+@require_admin()
+def delete_institution_admin(institution_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT institution_id FROM Institutions WHERE institution_id = ?", (institution_id,))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Institution not found'}), 404
+
+        cursor.execute("UPDATE Users SET institution_id = NULL WHERE institution_id = ?", (institution_id,))
+        cursor.execute("DELETE FROM Institutions WHERE institution_id = ?", (institution_id,))
+        conn.commit()
+        return jsonify({'message': 'Institution deleted'})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         conn.close()

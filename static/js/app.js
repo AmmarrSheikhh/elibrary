@@ -551,7 +551,17 @@ function initApp() {
     el.style.display = [1, 2].includes(currentUser.role_id) ? 'flex' : 'none';
   });
   document.querySelectorAll('.admin-only').forEach(el => {
-    el.style.display = currentUser.role_id === 1 ? 'flex' : 'none';
+    if (currentUser.role_id !== 1) {
+      el.style.display = 'none';
+      return;
+    }
+
+    if (el.classList.contains('page')) {
+      el.style.display = '';
+      return;
+    }
+
+    el.style.display = 'flex';
   });
 
   updateDashboardVisibility();
@@ -584,6 +594,7 @@ function showPage(name) {
   else if (name === 'recommendations') loadRecommendations();
   else if (name === 'upload') loadUploadForm();
   else if (name === 'admin') loadAdmin();
+  else if (name === 'manage') loadManageSystem();
 }
 
 function showAdminTab(tab) {
@@ -1285,7 +1296,12 @@ async function loadUploadForm() {
   if (catRes && catRes.ok) {
     const cats = await catRes.json();
     const sel = document.getElementById('up-categories');
-    sel.innerHTML = cats.map(c => `<option value="${c.category_id}">${c.category_name}</option>`).join('');
+    sel.innerHTML = cats.map(c => {
+      const desc = (c.description || '').trim();
+      const name = c.category_name || '';
+      const label = desc ? `${desc} · ${name}` : name;
+      return `<option value="${c.category_id}">${label}</option>`;
+    }).join('');
     enableMultiSelectToggle(sel);
   }
 
@@ -1790,6 +1806,473 @@ async function deletePaper(paperId) {
   closeModalDirect();
   showToast('Paper deleted', 'success');
   showPage('papers');
+}
+
+// ── MANAGE SYSTEM ─────────────────────────────
+
+function loadManageSystem() {
+  loadManageAuthors();
+  loadManageCategories();
+  loadManageInstitutions();
+  loadManageUsers();
+  loadManagePapers();
+}
+
+async function loadManageAuthors() {
+  const container = document.getElementById('manage-authors-table');
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Loading authors...</div>';
+
+  const res = await apiFetch('/admin/authors');
+  if (!res) {
+    container.innerHTML = '<div class="error-msg">Session expired. Please sign in again.</div>';
+    return;
+  }
+
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    container.innerHTML = `<div class="error-msg">${getApiErrorMessage(data, 'Failed to load authors')}</div>`;
+    return;
+  }
+
+  const authors = Array.isArray(data) ? data : [];
+  if (!authors.length) {
+    container.innerHTML = '<div class="empty-state"><span class="empty-icon">✎</span><p>No authors found</p></div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Affiliation</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        ${authors.map(a => `
+          <tr>
+            <td><span style="font-family:var(--font-mono);color:var(--text-muted)">#${a.author_id}</span></td>
+            <td>${a.author_name}</td>
+            <td>${a.affiliation || '—'}</td>
+            <td>
+              <button class="btn-danger btn-sm" onclick='confirmDeleteManageAuthor(${a.author_id}, ${JSON.stringify(a.author_name)})'>Delete</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadManageCategories() {
+  const container = document.getElementById('manage-categories-table');
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Loading categories...</div>';
+
+  const res = await apiFetch('/admin/categories');
+  if (!res) {
+    container.innerHTML = '<div class="error-msg">Session expired. Please sign in again.</div>';
+    return;
+  }
+
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    container.innerHTML = `<div class="error-msg">${getApiErrorMessage(data, 'Failed to load categories')}</div>`;
+    return;
+  }
+
+  const categories = Array.isArray(data) ? data : [];
+  if (!categories.length) {
+    container.innerHTML = '<div class="empty-state"><span class="empty-icon">▢</span><p>No categories found</p></div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr><th>ID</th><th>Description</th><th>Category</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        ${categories.map(c => `
+          <tr>
+            <td><span style="font-family:var(--font-mono);color:var(--text-muted)">#${c.category_id}</span></td>
+            <td>${c.description || '—'}</td>
+            <td>${c.category_name}</td>
+            <td>
+              <button class="btn-danger btn-sm" onclick='confirmDeleteManageCategory(${c.category_id}, ${JSON.stringify(c.category_name)})'>Delete</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadManageInstitutions() {
+  const container = document.getElementById('manage-institutions-table');
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Loading institutions...</div>';
+
+  const res = await apiFetch('/admin/institutions');
+  if (!res) {
+    container.innerHTML = '<div class="error-msg">Session expired. Please sign in again.</div>';
+    return;
+  }
+
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    container.innerHTML = `<div class="error-msg">${getApiErrorMessage(data, 'Failed to load institutions')}</div>`;
+    return;
+  }
+
+  const institutions = Array.isArray(data) ? data : [];
+  if (!institutions.length) {
+    container.innerHTML = '<div class="empty-state"><span class="empty-icon">🏛</span><p>No institutions found</p></div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Location</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        ${institutions.map(i => `
+          <tr>
+            <td><span style="font-family:var(--font-mono);color:var(--text-muted)">#${i.institution_id}</span></td>
+            <td>${i.name}</td>
+            <td>${i.location || '—'}</td>
+            <td>
+              <button class="btn-danger btn-sm" onclick='confirmDeleteManageInstitution(${i.institution_id}, ${JSON.stringify(i.name)})'>Delete</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadManageUsers() {
+  const container = document.getElementById('manage-users-table');
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Loading users...</div>';
+
+  const res = await apiFetch('/admin/users');
+  if (!res) {
+    container.innerHTML = '<div class="error-msg">Session expired. Please sign in again.</div>';
+    return;
+  }
+
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    container.innerHTML = `<div class="error-msg">${getApiErrorMessage(data, 'Failed to load users')}</div>`;
+    return;
+  }
+
+  const users = Array.isArray(data) ? data : [];
+  if (!users.length) {
+    container.innerHTML = '<div class="empty-state"><span class="empty-icon">👤</span><p>No users found</p></div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Institution</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        ${users.map(u => {
+          const isSelf = u.user_id === currentUser.user_id;
+          const actionHtml = isSelf
+            ? '<span class="text-muted">You</span>'
+            : `<button class="btn-danger btn-sm" onclick='confirmDeleteManageUser(${u.user_id}, ${JSON.stringify(u.name)})'>Delete</button>`;
+          return `
+          <tr>
+            <td><span style="font-family:var(--font-mono);color:var(--text-muted)">#${u.user_id}</span></td>
+            <td>${u.name}</td>
+            <td style="font-family:var(--font-mono);font-size:0.8rem">${u.email}</td>
+            <td><span class="role-badge role-${u.role_id}">${u.role_name}</span></td>
+            <td>${u.institution_name || '—'}</td>
+            <td>${actionHtml}</td>
+          </tr>
+        `;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadManagePapers() {
+  const container = document.getElementById('manage-papers-table');
+  if (!container) return;
+  container.innerHTML = '<div class="loading">Loading papers...</div>';
+
+  const res = await apiFetch('/admin/papers');
+  if (!res) {
+    container.innerHTML = '<div class="error-msg">Session expired. Please sign in again.</div>';
+    return;
+  }
+
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    container.innerHTML = `<div class="error-msg">${getApiErrorMessage(data, 'Failed to load papers')}</div>`;
+    return;
+  }
+
+  const papers = Array.isArray(data) ? data : [];
+  if (!papers.length) {
+    container.innerHTML = '<div class="empty-state"><span class="empty-icon">📄</span><p>No papers found</p></div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr><th>ID</th><th>Title</th><th>Year</th><th>Uploaded By</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        ${papers.map(p => `
+          <tr>
+            <td><span style="font-family:var(--font-mono);color:var(--text-muted)">#${p.paper_id}</span></td>
+            <td><span style="cursor:pointer;color:var(--accent)" onclick="viewPaper(${p.paper_id})">${p.title}</span></td>
+            <td>${p.publication_year || '—'}</td>
+            <td>${p.uploader_name || '—'}</td>
+            <td>
+              <button class="btn-danger btn-sm" onclick='confirmDeleteManagePaper(${p.paper_id}, ${JSON.stringify(p.title)})'>Delete</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function confirmDeleteManageAuthor(authorId, name) {
+  const displayName = name || 'this author';
+  const html = `
+    <div class="confirm-modal">
+      <div class="confirm-title">Delete Author</div>
+      <div class="confirm-body">Are you sure you want to delete <strong>${displayName}</strong>? This action cannot be undone.</div>
+      <div class="confirm-actions">
+        <button class="btn-ghost" onclick="closeModalDirect()">Cancel</button>
+        <button class="btn-danger" onclick="deleteManageAuthor(${authorId})">Delete Author</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+}
+
+async function deleteManageAuthor(authorId) {
+  const res = await apiFetch(`/admin/authors/${authorId}`, { method: 'DELETE' });
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to delete author'), 'error');
+    return;
+  }
+
+  closeModalDirect();
+  showToast('Author deleted', 'success');
+  loadManageAuthors();
+}
+
+function confirmDeleteManageCategory(categoryId, name) {
+  const displayName = name || 'this category';
+  const html = `
+    <div class="confirm-modal">
+      <div class="confirm-title">Delete Category</div>
+      <div class="confirm-body">Are you sure you want to delete <strong>${displayName}</strong>? This action cannot be undone.</div>
+      <div class="confirm-actions">
+        <button class="btn-ghost" onclick="closeModalDirect()">Cancel</button>
+        <button class="btn-danger" onclick="deleteManageCategory(${categoryId})">Delete Category</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+}
+
+async function deleteManageCategory(categoryId) {
+  const res = await apiFetch(`/admin/categories/${categoryId}`, { method: 'DELETE' });
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to delete category'), 'error');
+    return;
+  }
+
+  closeModalDirect();
+  showToast('Category deleted', 'success');
+  loadManageCategories();
+}
+
+function confirmDeleteManageInstitution(institutionId, name) {
+  const displayName = name || 'this institution';
+  const html = `
+    <div class="confirm-modal">
+      <div class="confirm-title">Delete Institution</div>
+      <div class="confirm-body">Are you sure you want to delete <strong>${displayName}</strong>? This action cannot be undone.</div>
+      <div class="confirm-actions">
+        <button class="btn-ghost" onclick="closeModalDirect()">Cancel</button>
+        <button class="btn-danger" onclick="deleteManageInstitution(${institutionId})">Delete Institution</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+}
+
+async function deleteManageInstitution(institutionId) {
+  const res = await apiFetch(`/admin/institutions/${institutionId}`, { method: 'DELETE' });
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to delete institution'), 'error');
+    return;
+  }
+
+  closeModalDirect();
+  showToast('Institution deleted', 'success');
+  loadManageInstitutions();
+  loadManageUsers();
+}
+
+function confirmDeleteManageUser(userId, name) {
+  const displayName = name || 'this user';
+  const html = `
+    <div class="confirm-modal">
+      <div class="confirm-title">Delete User</div>
+      <div class="confirm-body">Are you sure you want to delete <strong>${displayName}</strong>? This action cannot be undone.</div>
+      <div class="confirm-actions">
+        <button class="btn-ghost" onclick="closeModalDirect()">Cancel</button>
+        <button class="btn-danger" onclick="deleteManageUser(${userId})">Delete User</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+}
+
+async function deleteManageUser(userId) {
+  const res = await apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to delete user'), 'error');
+    return;
+  }
+
+  closeModalDirect();
+  showToast('User deleted', 'success');
+  loadManageUsers();
+}
+
+function confirmDeleteManagePaper(paperId, title) {
+  const displayTitle = title || 'this paper';
+  const html = `
+    <div class="confirm-modal">
+      <div class="confirm-title">Delete Paper</div>
+      <div class="confirm-body">Are you sure you want to permanently delete <strong>${displayTitle}</strong>? This action cannot be undone.</div>
+      <div class="confirm-actions">
+        <button class="btn-ghost" onclick="closeModalDirect()">Cancel</button>
+        <button class="btn-danger" onclick="deleteManagePaper(${paperId})">Delete Paper</button>
+      </div>
+    </div>
+  `;
+  openModal(html);
+}
+
+async function deleteManagePaper(paperId) {
+  const res = await apiFetch(`/papers/${paperId}`, { method: 'DELETE' });
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to delete paper'), 'error');
+    return;
+  }
+
+  closeModalDirect();
+  showToast('Paper deleted', 'success');
+  loadManagePapers();
+}
+
+async function createManageAuthor() {
+  const nameInput = document.getElementById('manage-author-name');
+  const affiliationInput = document.getElementById('manage-author-affiliation');
+  const name = nameInput?.value.trim() || '';
+  const affiliation = affiliationInput?.value.trim() || '';
+
+  if (!name || !affiliation) {
+    showToast('Author name and affiliation are required', 'error');
+    return;
+  }
+
+  const res = await apiFetch('/admin/authors', {
+    method: 'POST',
+    body: JSON.stringify({ name, affiliation })
+  });
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to add author'), 'error');
+    return;
+  }
+
+  if (nameInput) nameInput.value = '';
+  if (affiliationInput) affiliationInput.value = '';
+  showToast('Author added', 'success');
+  loadManageAuthors();
+}
+
+async function createManageCategory() {
+  const nameInput = document.getElementById('manage-category-name');
+  const descInput = document.getElementById('manage-category-desc');
+  const name = nameInput?.value.trim() || '';
+  const description = descInput?.value.trim() || '';
+
+  if (!name) {
+    showToast('Category name is required', 'error');
+    return;
+  }
+
+  const res = await apiFetch('/admin/categories', {
+    method: 'POST',
+    body: JSON.stringify({ name, description })
+  });
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to add category'), 'error');
+    return;
+  }
+
+  if (nameInput) nameInput.value = '';
+  if (descInput) descInput.value = '';
+  showToast('Category added', 'success');
+  loadManageCategories();
+}
+
+async function createManageInstitution() {
+  const nameInput = document.getElementById('manage-institution-name');
+  const locationInput = document.getElementById('manage-institution-location');
+  const name = nameInput?.value.trim() || '';
+  const location = locationInput?.value.trim() || '';
+
+  if (!name) {
+    showToast('Institution name is required', 'error');
+    return;
+  }
+
+  const res = await apiFetch('/admin/institutions', {
+    method: 'POST',
+    body: JSON.stringify({ name, location })
+  });
+  if (!res) return;
+  const data = await readApiResponse(res);
+  if (!res.ok) {
+    showToast(getApiErrorMessage(data, 'Failed to add institution'), 'error');
+    return;
+  }
+
+  if (nameInput) nameInput.value = '';
+  if (locationInput) locationInput.value = '';
+  showToast('Institution added', 'success');
+  loadManageInstitutions();
 }
 
 // ── MODAL ──────────────────────────────────────

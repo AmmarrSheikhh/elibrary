@@ -1141,6 +1141,28 @@ textarea { resize: vertical; min-height: 100px; }
   border-radius: 8px;
 }
 
+/* ── MANAGE SYSTEM ──────────────────────────── */
+.manage-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.manage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.9rem;
+  align-items: end;
+  margin-bottom: 0.75rem;
+}
+
+.manage-grid:last-child { margin-bottom: 0; }
+
+.manage-grid .btn-primary,
+.manage-grid .btn-secondary {
+  width: 100%;
+}
+
 /* ── ADMIN ───────────────────────────────────── */
 .admin-tabs {
   display: flex;
